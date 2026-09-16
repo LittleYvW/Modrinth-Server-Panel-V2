@@ -1063,6 +1063,24 @@ footer {
 
 }
 
+.electric-route {
+  opacity: 0;
+}
+.electric-route > path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.electric-glow {
+  stroke: #28e886;
+  stroke-width: 5;
+  opacity: .35;
+  filter: drop-shadow(0 0 5px #28e886);
+}
+.electric-core {
+  stroke: #b4ffd6;
+  stroke-width: 1.5;
+}
+
 .orbit-rings > circle {
   transform-origin: 836px 336px;
   animation: orbit-turn 100s linear infinite;
