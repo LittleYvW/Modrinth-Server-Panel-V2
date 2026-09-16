@@ -1063,6 +1063,42 @@ footer {
 
 }
 
+.orbit-rings > circle {
+  transform-origin: 836px 336px;
+  animation: orbit-turn 100s linear infinite;
+}
+.orbit-rings > circle:nth-child(even) {
+  animation-direction: reverse;
+  animation-duration: 140s;
+}
+.orbit-rings > circle:nth-child(3) {
+  animation-duration: 180s;
+}
+.ambient-halo {
+  animation: halo-breathe 8s ease-in-out infinite;
+}
+.signal-lines {
+  animation: signal-drift 10s ease-in-out infinite;
+}
+.floating-pixels > rect {
+  animation: pixel-float 14s ease-in-out infinite;
+}
+@keyframes orbit-turn {
+  to { transform: rotate(360deg); }
+}
+@keyframes halo-breathe {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+@keyframes signal-drift {
+  0%, 100% { transform: translateX(-8px); opacity: .1; }
+  50% { transform: translateX(8px); opacity: .26; }
+}
+@keyframes pixel-float {
+  0%, 100% { transform: translateY(10px); opacity: .35; }
+  50% { transform: translateY(-16px); opacity: 1; }
+}
+
 @media(prefers-reduced-motion:reduce) {
   *,*:before,*:after {
   animation:none!important;
