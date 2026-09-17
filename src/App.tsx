@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, CheckCheck, LoaderCircle, LogOut, Moon, Settings, Sun, X } from 'lucide-react';
 import Artwork, { Cube, FabricIcon, GrassBlock } from './Artwork';
 import { mods } from './data';
@@ -11,12 +11,17 @@ function readTheme(): Theme {
   try { return localStorage.getItem('server-mods-theme') === 'light' ? 'light' : 'dark'; }
   catch { return 'dark'; }
 }
-function Header({ theme, toggleTheme, manage, admin, configured, logout, busy }: {
-  theme: Theme; toggleTheme: () => void; manage: () => void; admin: boolean; configured: boolean; logout: () => void; busy: boolean;
+function Header({ theme, toggleTheme, manage, admin, configured, logout, busy, expanding, revealed }: {
+  theme: Theme; toggleTheme: () => void; manage: () => void; admin: boolean; configured: boolean; logout: () => void; busy: boolean; expanding: boolean; revealed: boolean;
 }) {
   return <header className="header"><div className="header-inner"><a className="brand" href="#" aria-label="Server Mods 首页"><Cube /><span>Server Mods</span></a><div className="header-actions">
-    <button className="manage-button" onClick={manage} disabled={admin && (!configured || busy)}><Settings size={18} /><span>{admin ? '设置' : '管理'}</span></button>
-    {admin && <button className="manage-button" onClick={logout} disabled={busy}><LogOut size={18} /><span>退出</span></button>}
+    <div className="management-controls">
+      {(!admin || expanding) && <button className={`manage-button${expanding ? ' management-leaving' : ''}`} onClick={manage} disabled={expanding}><Settings size={18} /><span>管理</span></button>}
+      {admin && <div className={`admin-controls${expanding ? ' controls-preparing' : revealed ? ' controls-revealed' : ''}`} aria-hidden={expanding || undefined} inert={expanding}>
+        <button className="manage-button" onClick={manage} disabled={!configured || busy}><Settings size={18} /><span>设置</span></button>
+        <button className="manage-button" onClick={logout} disabled={busy}><LogOut size={18} /><span>退出</span></button>
+      </div>}
+    </div>
     <div className="theme-control"><Sun size={19} /><button className="theme-switch" role="switch" aria-checked={theme === 'dark'} aria-label="深色主题" onClick={toggleTheme}><span /></button><Moon size={18} /></div>
   </div></div></header>;
 }
@@ -36,6 +41,10 @@ export default function App() {
   const [route, setRoute] = useState(window.location.hash);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authAttempt, setAuthAttempt] = useState(0);
+  const [transition, setTransition] = useState<'idle' | 'expanding' | 'revealed'>('idle');
+  const adminContent = useRef<HTMLDivElement>(null);
+  const needsHandoffFocus = useRef(false);
   const [settings, setSettings] = useState(false);
   const [config, setConfig] = useState<PanelConfig | null | undefined>();
   const [publicConfig, setPublicConfig] = useState<PublicConfig | null>(null);
@@ -45,6 +54,9 @@ export default function App() {
   const [toast, setToast] = useState<{ name: string; text: string; id: number } | null>(null);
   const isAdminRoute = route === '#/admin';
   const admin = isAdminRoute && !!auth?.authenticated;
+  const expanding = transition === 'expanding';
+  const handoffActive = useRef(false);
+  handoffActive.current = expanding;
   const notify = (name: string, text: string) => setToast({ name, text, id: Date.now() });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -56,10 +68,18 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
-    const change = () => setRoute(window.location.hash);
+    const change = () => {
+      setRoute(window.location.hash);
+      if (window.location.hash !== '#/admin') {
+        setTransition('idle');
+        if (handoffActive.current) setAuthOpen(false);
+      }
+    };
     const expired = () => {
       setAuth(current => current ? { ...current, authenticated: false } : null);
-      setConfig(undefined); setSettings(false); setAuthOpen(true); setRoute(''); window.location.hash = '';
+      setTransition('idle'); setAuthAttempt(value => value + 1);
+      setConfig(undefined); setSettings(false); setAuthOpen(true); setRoute('');
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
       notify('请重新登录', '登录已失效，请输入管理员密码。');
     };
     window.addEventListener('hashchange', change); window.addEventListener('session-expired', expired);
@@ -86,9 +106,24 @@ export default function App() {
       .catch(error => { if (!request.signal.aborted) setError(errorMessage(error)); });
     return () => request.abort();
   }, [auth?.authenticated, retry]);
+  useLayoutEffect(() => {
+    if (transition !== 'revealed' || !admin) return;
+    const content = adminContent.current;
+    if (!needsHandoffFocus.current && document.activeElement !== content) return;
+    const focusTarget = content?.querySelector<HTMLElement>('h1, input:not(:disabled), button:not(:disabled)') ?? content;
+    if (focusTarget) {
+      if (focusTarget === content || focusTarget.tagName === 'H1') focusTarget.tabIndex = -1;
+      focusTarget.focus({ preventScroll: true });
+      needsHandoffFocus.current = false;
+    }
+  }, [transition, admin, config]);
   const toggleTheme = () => setTheme(current => current === 'dark' ? 'light' : 'dark');
   function onAuthenticated(status: AuthStatus) {
-    setAuth(status); setAuthOpen(false); setError(''); window.location.hash = '/admin';
+    setAuth(status); setTransition('expanding'); setError(''); setRoute('#/admin'); window.location.hash = '/admin';
+  }
+  function finishAuthTransition() {
+    needsHandoffFocus.current = true;
+    setAuthOpen(false); setTransition('revealed');
   }
   function onSaved(value: PanelConfig) {
     setConfig(value); setPublicConfig(value); setSettings(false);
@@ -96,6 +131,7 @@ export default function App() {
     notify('配置已保存', '游戏环境已更新。');
   }
   function signedOut() {
+    setTransition('idle');
     setAuth(current => current ? { ...current, authenticated: false } : current);
     setConfig(undefined); setSettings(false); setRoute(''); window.location.hash = '';
   }
@@ -109,15 +145,16 @@ export default function App() {
     if (admin) setSettings(true);
     else setAuthOpen(true);
   }
-  return <><Header theme={theme} toggleTheme={toggleTheme} manage={manage} admin={admin} configured={!!config} logout={logout} busy={busy} />
-    <main className={admin ? 'admin-main' : undefined}><Artwork />
-      {admin ? <div className="admin-content">
+  return <><div className="navigation-layer" inert={expanding}><Header theme={theme} toggleTheme={toggleTheme} manage={manage} admin={admin} configured={!!config} logout={logout} busy={busy} expanding={expanding} revealed={transition === 'revealed'} /></div>
+    <main className={admin ? 'admin-main' : undefined}><Artwork simple={admin} />
+      {admin && <div ref={adminContent} className={`admin-content${expanding ? ' admin-preparing' : transition === 'revealed' ? ' admin-revealed' : ''}`} inert={expanding} aria-hidden={expanding || undefined} tabIndex={-1}>
         {config === undefined ? <div className="setup-panel loading-panel">{error ? <><p className="form-error" role="alert">{error}</p><button className="secondary-button" onClick={() => setRetry(n => n + 1)}>重试</button></> : <><LoaderCircle className="spin" size={24} /><p>正在加载工作空间…</p></>}</div>
           : config === null ? <section className="setup-panel"><div className="workspace-intro"><span className="section-kicker">WELCOME TO YOUR WORKSPACE</span><h1>让世界准备就绪。</h1><p>完成两个简单设置，开始管理你的模组。</p></div><ConfigForm wizard saved={onSaved} /></section>
             : <section className="manager-workspace" aria-labelledby="manager-title"><div className="workspace-heading"><div><span className="section-kicker">YOUR WORKSPACE</span><h1 id="manager-title">模组管理器</h1></div><span className="environment-badge">Minecraft {config.minecraftVersion}<span />{loaderNames[config.loader]}{config.loaderVersion ? ` ${config.loaderVersion}` : ''}</span></div><div className="empty-workspace" /></section>}
-      </div> : <div className="main-content"><Hero config={publicConfig} /><DownloadCard download={name => notify(name, '演示模式：暂未接入真实下载资源。')} /><ModList download={name => notify(name, '演示模式：暂未接入真实下载资源。')} /><footer><span className="status-dot" />为更好的游戏体验而构建<span className="footer-separator">/</span><span>保持原版，探索更多。</span></footer></div>}
+      </div>}
+      {(!admin || expanding) && <div className={`main-content${expanding ? ' home-leaving' : ''}`} inert={expanding} aria-hidden={expanding || undefined}><Hero config={publicConfig} /><DownloadCard download={name => notify(name, '演示模式：暂未接入真实下载资源。')} /><ModList download={name => notify(name, '演示模式：暂未接入真实下载资源。')} /><footer><span className="status-dot" />为更好的游戏体验而构建<span className="footer-separator">/</span><span>保持原版，探索更多。</span></footer></div>}
     </main>
-    {authOpen && <AuthDialog close={() => { setAuthOpen(false); if (isAdminRoute && !auth?.authenticated) window.location.hash = ''; }} authenticated={onAuthenticated} />}
+    {authOpen && <AuthDialog key={authAttempt} close={() => { setAuthOpen(false); if (isAdminRoute && !auth?.authenticated) window.location.hash = ''; }} authenticated={onAuthenticated} transition={expanding ? { target: adminContent, complete: finishAuthTransition } : undefined} />}
     {settings && config && <SettingsDialog config={config} close={() => setSettings(false)} saved={onSaved} theme={theme} toggleTheme={toggleTheme} passwordChanged={() => { signedOut(); setAuthOpen(true); notify('密码已更新', '请使用新密码重新登录。'); }} />}
     <div className="toast-region" role="status" aria-live="polite">{toast && <div className="toast" key={toast.id}><CheckCheck size={22} /><div><strong>{toast.name}</strong><p>{toast.text}</p></div><button aria-label="关闭提示" onClick={() => setToast(null)}><X size={18} /></button></div>}</div>
   </>;

@@ -3,8 +3,9 @@ import { ArrowLeft, ArrowRight, Check, File, Folder, KeyRound, LoaderCircle, Moo
 import { loaders, loaderNames, type AuthStatus, type DirectoryListing, type PanelConfig, type VersionList } from '../shared/types';
 import { api, ApiError, errorMessage } from './api';
 import Modal from './Modal';
+import type { DialogTransition } from './useDialogTransition';
 
-export function AuthDialog({ close, authenticated }: { close: () => void; authenticated: (status: AuthStatus) => void }) {
+export function AuthDialog({ close, authenticated, transition }: { close: () => void; authenticated: (status: AuthStatus) => void; transition?: DialogTransition }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -12,14 +13,21 @@ export function AuthDialog({ close, authenticated }: { close: () => void; authen
   const [busy, setBusy] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | null>(null);
+  const accepted = useRef(false);
+  const accept = (result: AuthStatus) => {
+    if (accepted.current) return;
+    accepted.current = true;
+    authenticated(result);
+  };
   const load = () => {
     setError('');
     controller.current?.abort();
     const request = new AbortController();
     controller.current = request;
     api<AuthStatus>('/auth/status', { signal: request.signal }).then(result => {
+      if (request.signal.aborted) return;
       setStatus(result);
-      if (result.authenticated) authenticated(result);
+      if (result.authenticated) accept(result);
     }).catch(error => { if (!request.signal.aborted) setError(errorMessage(error)); });
   };
   useEffect(() => { load(); return () => controller.current?.abort(); }, []); // Initial status determines registration vs login.
@@ -27,13 +35,13 @@ export function AuthDialog({ close, authenticated }: { close: () => void; authen
   const register = status && !status.registered;
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!status || busy) return;
+    if (!status || busy || accepted.current || transition) return;
     if (register && password !== confirm) { setError('两次输入的密码不一致。'); return; }
     setBusy(true); setError('');
     const request = new AbortController(); controller.current = request;
     try {
       const result = await api<AuthStatus>(register ? '/auth/register' : '/auth/login', { method: 'POST', body: JSON.stringify({ password }), signal: request.signal });
-      authenticated(result);
+      if (!request.signal.aborted) accept(result);
     } catch (error) {
       if (request.signal.aborted) return;
       if (error instanceof ApiError && error.status === 409) {
@@ -43,7 +51,7 @@ export function AuthDialog({ close, authenticated }: { close: () => void; authen
       setError(errorMessage(error));
     } finally { setBusy(false); }
   }
-  return <Modal title={status ? register ? '管理员注册' : '管理员登录' : '管理员验证'} kicker="ADMIN ACCESS" close={close}>
+  return <Modal title={status ? register ? '管理员注册' : '管理员登录' : '管理员验证'} kicker="ADMIN ACCESS" close={close} entrance transition={transition} onCloseStart={() => { accepted.current = true; controller.current?.abort(); }}>
     {!status ? <div className="form-intro"><p>{error || '正在连接管理服务…'}</p>{error && <button className="secondary-button" onClick={load}>重试</button>}</div> : <form className="admin-form" onSubmit={submit}>
       <p className="form-description">{register ? '首次使用，请创建管理员密码，开启你的模组工作空间。' : '输入管理员密码，继续管理你的模组工作空间。'}</p>
       <label className="field">{register ? '设置密码' : '管理员密码'}<input ref={passwordRef} type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={register ? 8 : undefined} maxLength={256} required value={password} onChange={e => setPassword(e.target.value)} placeholder={register ? '至少 8 个字符' : '输入密码'} disabled={busy} /></label>

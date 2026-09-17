@@ -18,6 +18,8 @@ type Options = {
 type Session = { expires: number; adminHash: string; checkedDirectories: Set<string> };
 const COOKIE = 'server_mods_session';
 const SESSION_AGE = 24 * 60 * 60 * 1000;
+const ATTEMPT_LIMIT = 10;
+const ATTEMPT_WINDOW = 15 * 60 * 1000;
 
 export async function createApp(options: Options) {
   const store = await createStore(options.dataDirectory);
@@ -67,14 +69,21 @@ export async function createApp(options: Options) {
     res.cookie(COOKIE, key, { ...cookieOptions(req), maxAge: SESSION_AGE });
   }
   function throttle(req: Request, res: Response, next: NextFunction) {
-    const key = req.ip ?? 'unknown';
-    const attempt = attempts.get(key) ?? { count: 0, until: now() + 15 * 60 * 1000 };
-    attempts.set(key, attempt);
-    if (++attempt.count > 10) {
+    const attempt = attempts.get(req.ip ?? 'unknown');
+    if (attempt && attempt.count >= ATTEMPT_LIMIT && attempt.until > now()) {
       res.set('Retry-After', String(Math.ceil((attempt.until - now()) / 1000)));
       throw new HttpError(429, '尝试次数过多，请稍后再试。');
     }
     next();
+  }
+  function recordFailure(req: Request) {
+    const key = req.ip ?? 'unknown';
+    const attempt = attempts.get(key) ?? { count: 0, until: now() + ATTEMPT_WINDOW };
+    attempt.count += 1;
+    attempts.set(key, attempt);
+  }
+  function clearFailures(req: Request) {
+    attempts.delete(req.ip ?? 'unknown');
   }
   function status(req: Request) {
     const state = store.read();
@@ -85,9 +94,10 @@ export async function createApp(options: Options) {
     const password: unknown = req.body?.password;
     validatePassword(password);
     await store.update(async state => {
-      if (state.admin) throw new HttpError(409, '管理员密码已创建，请登录。');
+      if (state.admin) { recordFailure(req); throw new HttpError(409, '管理员密码已创建，请登录。'); }
       return { ...state, admin: await hashPassword(password) };
     });
+    clearFailures(req);
     issueSession(req, res);
     res.status(201).json({ ...status(req), authenticated: true });
   });
@@ -95,8 +105,10 @@ export async function createApp(options: Options) {
     const admin = store.read().admin;
     if (!admin) throw new HttpError(409, '请先注册管理员密码。');
     if (!await verifyPassword(req.body?.password, admin) || store.read().admin !== admin) {
+      recordFailure(req);
       throw new HttpError(401, '密码不正确，请重试。');
     }
+    clearFailures(req);
     issueSession(req, res);
     res.json({ ...status(req), authenticated: true });
   });
@@ -110,11 +122,15 @@ export async function createApp(options: Options) {
     validatePassword(password);
     await store.update(async state => {
       requireSession(req);
-      if (!state.admin || !await verifyPassword(req.body?.currentPassword, state.admin)) throw new HttpError(400, '当前密码不正确。');
+      if (!state.admin || !await verifyPassword(req.body?.currentPassword, state.admin)) {
+        recordFailure(req);
+        throw new HttpError(400, '当前密码不正确。');
+      }
       const admin = await hashPassword(password);
       requireSession(req);
       return { ...state, admin };
     });
+    clearFailures(req);
     sessions.clear();
     res.clearCookie(COOKIE, cookieOptions(req));
     res.json({ ok: true });

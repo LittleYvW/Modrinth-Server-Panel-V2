@@ -75,6 +75,14 @@ describe('administrator authentication', () => {
     const limited = await write(request(app), '/api/auth/login', { password: 'wrong' }).expect(429);
     expect(limited.headers['retry-after']).toBeDefined();
   });
+  it('counts only failed attempts and clears them after a successful login', async () => {
+    await register();
+    for (let i = 0; i < 20; i++) await write(request(app), '/api/auth/login', { password }).expect(200);
+    for (let i = 0; i < 9; i++) await write(request(app), '/api/auth/login', { password: 'wrong' }).expect(401);
+    await write(request(app), '/api/auth/login', { password }).expect(200);
+    for (let i = 0; i < 10; i++) await write(request(app), '/api/auth/login', { password: 'wrong' }).expect(401);
+    await write(request(app), '/api/auth/login', { password }).expect(429);
+  });
   it('sets Secure cookies when the public origin is HTTPS', async () => {
     const secure = await createApp({ dataDirectory: join(directory, 'secure'), publicOrigin: 'https://panel.test' });
     const response = await request(secure).post('/api/auth/register').set('Origin', 'https://panel.test').send({ password }).expect(201);

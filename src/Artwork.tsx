@@ -24,9 +24,9 @@ const circuitRoutes = [
   'M1292 849h171v-70l80-80',
 ];
 
-export default function Artwork() {
-  const circuitsRef = useCircuitRelay();
-  return <div className="artwork" aria-hidden="true"><svg className="scene" viewBox="0 0 1672 940" preserveAspectRatio="xMidYMin slice"><defs>
+export default function Artwork({ simple = false }: { simple?: boolean }) {
+  const circuitsRef = useCircuitRelay(!simple);
+  return <div className={`artwork${simple ? ' artwork-simple' : ''}`} aria-hidden="true"><svg className="scene" viewBox="0 0 1672 940" preserveAspectRatio="xMidYMin slice"><defs>
     <radialGradient id="halo"><stop stopColor="#16c66a" stopOpacity=".07" /><stop offset=".77" stopColor="#16c66a" stopOpacity=".015" /><stop offset="1" stopColor="#16c66a" stopOpacity="0" /></radialGradient>
     <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#1a7142" /><stop offset=".48" stopColor="#123d29" /><stop offset="1" stopColor="#17693c" /></linearGradient>
     <linearGradient id="shaft"><stop stopColor="#196c3d" /><stop offset=".5" stopColor="#0b2019" /><stop offset="1" stopColor="#196c3d" /></linearGradient>
@@ -34,6 +34,7 @@ export default function Artwork() {
     <path id="wrench" d="M102 311 201 234Q208 229 219 229H282Q295 229 304 239L398 339Q403 344 418 344H1254Q1269 344 1274 339L1368 239Q1377 229 1390 229H1453Q1464 229 1471 234L1570 311Q1574 316 1565 316H1440L1399 357V437L1440 470H1565Q1574 470 1570 476L1471 550Q1464 556 1453 556H1390Q1377 556 1368 546L1274 451Q1269 446 1254 446H418Q403 446 398 451L304 546Q295 556 282 556H219Q208 556 201 550L102 476Q98 470 107 470H233L273 437V357L233 316H107Q98 316 102 311Z" />
   </defs>
   <circle className="ambient-halo" cx="836" cy="339" r="550" fill="url(#halo)" />
+  <g className="artwork-decoration">
   <g ref={circuitsRef} className="side-circuits" fill="none" stroke="#1a332b" strokeWidth="1">
     {circuitRoutes.map((route, index) => <g key={route}>
       <path d={route} />
@@ -51,6 +52,7 @@ export default function Artwork() {
   <g fill="none" stroke="#092b1c" strokeWidth="3"><path d="m177 280 25-25h67l66 70h28l28 28M176 505l26 25h67l77-86h39M1495 280l-25-25h-67l-66 70h-28l-28 28M1496 505l-26 25h-67l-77-86h-39M481 363h104l20 19h462l20-19h104M481 429h710" /></g>
   <g fill="#0b3321" stroke="#26784a"><path d="M154 286h18v18h-18zM326 344h21v22h-21zM347 366h21v21h-21zM327 388h19v20h-19zM154 480h18v18h-18zM172 498h19v20h-19zM552 387h18v19h-18zM1470 286h16v16h-16zM1498 286h19v28h-19zM1301 381h19v19h-19zM1320 400h18v20h-18zM1338 420h19v19h-19zM1500 482h18v18h-18zM1102 387h18v19h-18z" /></g>
   </g>
+  </g>
   <g className="floating-pixels" fill="#74988a" opacity=".10">{Array.from({
           length: 34
         }, (_, i) => {
@@ -58,6 +60,6 @@ export default function Artwork() {
           const y = 144 + i * 83 % 592;
           return <rect key={i} style={{ animationDelay: `${-i * 0.75}s`, animationDuration: `${12 + i % 7}s` }} x={x} y={y} width={18 + i % 12} height={18 + i % 12} />;
         })}</g>
-  <g fill="#84938f" opacity=".3"><path d="M1582 103h13v14h-13zM1595 117h14v14h-14zM1582 131h13v14h-13zM61 767h11v11H61zM83 767h11v11H83zM72 778h11v12H72zM61 790h11v11H61zM83 790h11v11H83zM1586 793h13v13h-13zM1599 780h13v13h-13z" /></g>
+  <g className="artwork-decoration"><g fill="#84938f" opacity=".3"><path d="M1582 103h13v14h-13zM1595 117h14v14h-14zM1582 131h13v14h-13zM61 767h11v11H61zM83 767h11v11H83zM72 778h11v12H72zM61 790h11v11H61zM83 790h11v11H83zM1586 793h13v13h-13zM1599 780h13v13h-13z" /></g></g>
   </svg><div className="edge-copy top-left">BUILD<br />BETTER<br />TOGETHER</div><div className="edge-copy top-right">MODS<br />POWER<br />COMMUNITY</div><div className="edge-copy bottom-left">SAME<br />GAME<br />BIGGER<br />POSSIBILITIES</div><div className="edge-copy bottom-right">SERVERS<br />MODS<br />PEOPLE</div></div>;
 }

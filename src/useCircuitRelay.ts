@@ -20,7 +20,7 @@ export function chooseCircuit(starts: number[], now: number, random = Math.rando
   return available.length ? available[Math.floor(random() * available.length)] : -1;
 }
 
-export function useCircuitRelay() {
+export function useCircuitRelay(enabled = true) {
   const ref = useRef<SVGGElement>(null);
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export function useCircuitRelay() {
         group.nextAt = 0;
       });
       routes.forEach(route => { route.style.opacity = '0'; });
-      if (!motion.matches && !document.hidden) frame = requestAnimationFrame(tick);
+      if (enabled && !motion.matches && !document.hidden) frame = requestAnimationFrame(tick);
     };
 
     reset();
@@ -67,7 +67,7 @@ export function useCircuitRelay() {
       document.removeEventListener('visibilitychange', reset);
       routes.forEach(route => { route.style.opacity = ''; });
     };
-  }, []);
+  }, [enabled]);
 
   return ref;
 }
