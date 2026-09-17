@@ -3,3 +3,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+dist-server/
+.panel-data/
+.test-data/
+.env
+coverage/

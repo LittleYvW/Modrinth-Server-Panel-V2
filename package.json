@@ -3,7 +3,38 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "scripts": { "dev": "vite --host 0.0.0.0", "build": "tsc -b && vite build", "typecheck": "tsc --noEmit", "preview": "vite preview --host 0.0.0.0" },
-  "dependencies": { "react": "^19.1.0", "react-dom": "^19.1.0", "lucide-react": "^0.468.0" },
-  "devDependencies": { "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0", "@vitejs/plugin-react": "^4.5.0", "typescript": "~5.8.3", "vite": "^6.3.5" }
+  "scripts": {
+    "dev": "concurrently --kill-others --names api,web \"tsx watch server/index.ts\" \"vite --host 0.0.0.0\"",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "tsc --noEmit && tsc -p tsconfig.server.json && vite build",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "start": "node dist-server/server/index.js",
+    "test": "vitest run",
+    "preview": "node dist-server/server/index.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "fast-xml-parser": "^5.11.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.3",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/supertest": "^7.2.1",
+    "@vitejs/plugin-react": "^4.5.0",
+    "concurrently": "^10.0.5",
+    "jsdom": "^30.1.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.13",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^5.0.1"
+  }
 }
