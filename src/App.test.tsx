@@ -32,6 +32,7 @@ beforeEach(() => {
     if (path === '/auth/login' || path === '/auth/register') return { registered: true, authenticated: true, configured: !!panel };
     if (path === '/admin/config') return panel;
     if (path === '/public/config') return null;
+    if (path === '/public/mods' || path === '/admin/mods') return { revision: 1, mods: [], scanning: false, configured: true };
     if (path === '/auth/logout') return {};
     return { versions: [] };
   });

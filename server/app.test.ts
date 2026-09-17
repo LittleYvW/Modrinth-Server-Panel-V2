@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { createApp } from './app.js';
 import { HttpError } from './errors.js';
+import type { Modrinth } from './modrinth.js';
 
 const root = resolve('.test-data');
 const password = 'test-only-password';
@@ -11,6 +13,14 @@ const config = { minecraftVersion: '1.20.1', loader: 'quilt', loaderVersion: nul
 const sources = { minecraft: async () => ({ versions: [{ id: '1.20.1', type: 'release' }] }), loaders: async () => ({ versions: [{ id: '0.27.1' }] }) };
 let directory: string;
 let app: Awaited<ReturnType<typeof createApp>>;
+let built: Awaited<ReturnType<typeof createApp>>[] = [];
+// The mod service must never reach the network from a test, and its watchers must not outlive one.
+const offline: Modrinth = { versionsByHash: async () => new Map(), projects: async () => new Map(), project: async () => null };
+async function build(options: Parameters<typeof createApp>[0]) {
+  const created = await createApp({ modrinth: offline, watchFiles: false, pollInterval: 3_600_000, settleDelay: 0, ...options });
+  built.push(created);
+  return created;
+}
 function write(agent: ReturnType<typeof request> | ReturnType<typeof request.agent>, path: string, body: unknown, method: 'post' | 'put' = 'post') {
   return agent[method](path).set('Host', 'panel.test').set('Origin', 'http://panel.test').send(body);
 }
@@ -22,9 +32,11 @@ async function register() {
 beforeEach(async () => {
   await mkdir(root, { recursive: true });
   directory = await mkdtemp(join(root, 'api-'));
-  app = await createApp({ dataDirectory: join(directory, 'data'), versions: sources });
+  app = await build({ dataDirectory: join(directory, 'data'), versions: sources });
 });
 afterEach(async () => {
+  for (const created of built) await created.locals.mods.close();
+  built = [];
   if (!resolve(directory).startsWith(root + sep)) throw new Error('Unsafe test cleanup');
   await rm(directory, { recursive: true, force: true });
 });
@@ -60,14 +72,14 @@ describe('administrator authentication', () => {
     await first.get('/api/admin/config').expect(401); await second.get('/api/admin/config').expect(401);
     await write(first, '/api/auth/login', { password }).expect(401);
     const login = await write(first, '/api/auth/login', { password: 'replacement-password' }).expect(200);
-    const restarted = await createApp({ dataDirectory: join(directory, 'data'), versions: sources });
+    const restarted = await build({ dataDirectory: join(directory, 'data'), versions: sources });
     await request(restarted).get('/api/admin/config').set('Cookie', login.headers['set-cookie']).expect(401);
     expect((await request(restarted).get('/api/auth/status')).body.registered).toBe(true);
     await write(first, '/api/auth/logout', {}).expect(200); await first.get('/api/admin/config').expect(401);
   });
   it('expires sessions at 24 hours and rate limits repeated login attempts', async () => {
     let time = 0;
-    app = await createApp({ dataDirectory: join(directory, 'clock'), versions: sources, now: () => time });
+    app = await build({ dataDirectory: join(directory, 'clock'), versions: sources, now: () => time });
     const agent = await register();
     time = 24 * 60 * 60 * 1000 + 1;
     await agent.get('/api/admin/config').expect(401);
@@ -84,7 +96,7 @@ describe('administrator authentication', () => {
     await write(request(app), '/api/auth/login', { password }).expect(429);
   });
   it('sets Secure cookies when the public origin is HTTPS', async () => {
-    const secure = await createApp({ dataDirectory: join(directory, 'secure'), publicOrigin: 'https://panel.test' });
+    const secure = await build({ dataDirectory: join(directory, 'secure'), publicOrigin: 'https://panel.test' });
     const response = await request(secure).post('/api/auth/register').set('Origin', 'https://panel.test').send({ password }).expect(201);
     expect(response.headers['set-cookie'][0]).toContain('Secure');
   });
@@ -96,7 +108,7 @@ describe('configuration and directory access', () => {
     let finishOlder!: () => void;
     let startedOlder!: () => void;
     const started = new Promise<void>(resolve => { startedOlder = resolve; });
-    app = await createApp({ dataDirectory: join(directory, 'race'), listDirectory: async value => {
+    app = await build({ dataDirectory: join(directory, 'race'), listDirectory: async value => {
       if (value === older) { startedOlder(); await new Promise<void>(resolve => { finishOlder = resolve; }); }
       return { path: String(value), entries: [] };
     } });
@@ -122,7 +134,7 @@ describe('configuration and directory access', () => {
     await write(agent, '/api/admin/config', { ...config, modsDirectory }, 'put').expect(200);
     expect((await agent.get('/api/auth/status')).body.configured).toBe(true);
     expect((await request(app).get('/api/public/config')).body).toEqual(config);
-    const restarted = await createApp({ dataDirectory: join(directory, 'data'), versions: sources });
+    const restarted = await build({ dataDirectory: join(directory, 'data'), versions: sources });
     const reconnected = request.agent(restarted);
     await write(reconnected, '/api/auth/login', { password }).expect(200);
     expect((await reconnected.get('/api/admin/config')).body).toEqual({ ...config, modsDirectory });
@@ -136,7 +148,7 @@ describe('configuration and directory access', () => {
     await write(agent, '/api/admin/directory/check', { path: 'relative' }).expect(400);
     const file = join(directory, 'file.jar'); await writeFile(file, 'test');
     expect((await write(agent, '/api/admin/directory/check', { path: file }).expect(400)).body.error).toContain('不是目录');
-    const denied = await createApp({ dataDirectory: join(directory, 'data'), listDirectory: async () => { throw new HttpError(403, '没有读取此目录的权限。'); } });
+    const denied = await build({ dataDirectory: join(directory, 'data'), listDirectory: async () => { throw new HttpError(403, '没有读取此目录的权限。'); } });
     const deniedAgent = request.agent(denied); await write(deniedAgent, '/api/auth/login', { password }).expect(200);
     await write(deniedAgent, '/api/admin/directory/check', { path: empty }).expect(403);
   });
@@ -148,5 +160,96 @@ describe('configuration and directory access', () => {
     await write(agent, '/api/admin/config', { ...config, modsDirectory: target }, 'put').expect(400);
     expect((await agent.get('/api/auth/status')).body.configured).toBe(false);
     expect((await request(app).get('/api/public/config')).body).toBe(null);
+  });
+});
+
+describe('mod list, switches and downloads', () => {
+  const hash = (value: string) => createHash('sha512').update(value).digest('hex');
+  async function configured() {
+    const modsDirectory = join(directory, 'live');
+    await mkdir(modsDirectory, { recursive: true });
+    await writeFile(join(modsDirectory, 'sodium.jar'), 'sodium');
+    await writeFile(join(modsDirectory, 'plain.jar'), 'plain');
+    const bound = {
+      id: 'v1', project_id: 'p1', version_number: '0.5.3',
+      files: [{ hashes: { sha512: hash('sodium') }, url: 'https://cdn.modrinth.com/v1.jar', primary: true }],
+      environment: 'client_only',
+    };
+    const modrinth: Modrinth = {
+      versionsByHash: async hashes => new Map(hashes.includes(hash('sodium')) ? [[hash('sodium'), bound]] : []),
+      projects: async ids => new Map(ids.includes('p1') ? [['p1', { id: 'p1', slug: 'sodium', title: 'Sodium', description: '现代渲染引擎。', icon_url: 'https://cdn.modrinth.com/p1.png', project_type: 'mod' }]] : []),
+      project: async () => null,
+    };
+    app = await build({ dataDirectory: join(directory, 'data'), versions: sources, modrinth });
+    const agent = await register();
+    await write(agent, '/api/admin/directory/check', { path: modsDirectory }).expect(200);
+    await write(agent, '/api/admin/config', { ...config, modsDirectory }, 'put').expect(200);
+    return { agent, modsDirectory };
+  }
+
+  it('publishes only open mods, keeps administration private and refuses unauthenticated writes', async () => {
+    const { agent, modsDirectory } = await configured();
+    const list = (await agent.get('/api/admin/mods').expect(200)).body;
+    expect(list.mods.map((mod: { name: string; side: string; binding: string }) => [mod.name, mod.side, mod.binding]))
+      .toEqual([['plain', 'both', 'unbound'], ['Sodium', 'client', 'bound']]);
+    const sodium = list.mods.find((mod: { name: string }) => mod.name === 'Sodium');
+    const publicList = (await request(app).get('/api/public/mods').expect(200)).body;
+    expect(publicList.mods).toHaveLength(2);
+    expect(JSON.stringify(publicList)).not.toContain(modsDirectory);
+    expect(Object.keys(publicList.mods[0])).toEqual(['id', 'name', 'description', 'version', 'iconUrl', 'projectUrl', 'side']);
+    await request(app).get('/api/admin/mods').expect(401);
+    await request(app).patch(`/api/admin/mods/${sodium.id}`).set('Host', 'panel.test').set('Origin', 'http://panel.test').send({ enabled: false }).expect(401);
+    await agent.patch(`/api/admin/mods/${sodium.id}`).set('Origin', 'https://evil.test').send({ enabled: false }).expect(403);
+  });
+
+  it('closes a mod, then refuses the old download link until it is opened again', async () => {
+    const { agent } = await configured();
+    const list = (await agent.get('/api/admin/mods')).body.mods;
+    const sodium = list.find((mod: { name: string }) => mod.name === 'Sodium');
+    const plain = list.find((mod: { name: string }) => mod.name === 'plain');
+    expect((await request(app).get(`/api/public/mods/${sodium.id}/download`).expect(302)).headers.location).toBe('https://cdn.modrinth.com/v1.jar');
+    const file = await request(app).get(`/api/public/mods/${plain.id}/download`).expect(200);
+    expect(file.headers['content-disposition']).toContain('plain.jar');
+    expect(file.text).toBe('plain');
+    await write(agent, `/api/admin/mods/${plain.id}`, { enabled: false }, 'patch').expect(200);
+    await request(app).get(`/api/public/mods/${plain.id}/download`).expect(404);
+    expect((await request(app).get('/api/public/mods')).body.mods).toHaveLength(1);
+    await write(agent, `/api/admin/mods/${plain.id}`, { enabled: true }, 'patch').expect(200);
+    await request(app).get(`/api/public/mods/${plain.id}/download`).expect(200);
+    await request(app).get('/api/public/mods/not-an-entry/download').expect(404);
+  });
+
+  it('keeps a manual category and a manual configuration apart from the binding', async () => {
+    const { agent } = await configured();
+    const list = (await agent.get('/api/admin/mods')).body.mods;
+    const sodium = list.find((mod: { name: string }) => mod.name === 'Sodium');
+    await write(agent, `/api/admin/mods/${sodium.id}`, { projectId: 'other' }, 'patch').expect(409);
+    const unbound = (await write(agent, `/api/admin/mods/${sodium.id}/unbind`, {})).body;
+    expect(unbound).toMatchObject({ binding: 'unbound', side: 'client', enabled: true, name: 'Sodium' });
+    await write(agent, `/api/admin/mods/${sodium.id}`, { downloadUrl: 'https://mirror.test/sodium.jar' }, 'patch').expect(200);
+    expect((await request(app).get(`/api/public/mods/${sodium.id}/download`).expect(302)).headers.location).toBe('https://mirror.test/sodium.jar');
+    const manual = (await write(agent, `/api/admin/mods/${sodium.id}`, { side: 'server' }, 'patch')).body;
+    expect(manual).toMatchObject({ side: 'server', categorySource: 'manual', downloadUrl: 'https://mirror.test/sodium.jar' });
+    const rebound = (await write(agent, `/api/admin/mods/${sodium.id}/resolve`, {})).body;
+    expect(rebound).toMatchObject({ binding: 'bound', side: 'server', enabled: true });
+  });
+
+  it('streams the list revision to every connected client', async () => {
+    const { agent } = await configured();
+    const server = app.listen(0);
+    try {
+      const { port } = server.address() as { port: number };
+      const stream = await fetch(`http://127.0.0.1:${port}/api/public/mods/events`);
+      const reader = stream.body!.getReader();
+      const read = async () => new TextDecoder().decode((await reader.read()).value);
+      expect(await read()).toContain('event: mods');
+      const plain = (await agent.get('/api/admin/mods')).body.mods.find((mod: { name: string }) => mod.name === 'plain');
+      await write(agent, `/api/admin/mods/${plain.id}`, { enabled: false }, 'patch').expect(200);
+      expect(await read()).toMatch(/event: mods\ndata: \d+/);
+      await reader.cancel();
+    } finally {
+      server.closeAllConnections();
+      await new Promise(done => server.close(done));
+    }
   });
 });
