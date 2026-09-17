@@ -64,6 +64,7 @@ export function VersionFields({ value, change, disabled }: { value: PanelConfig;
   const [loaderError, setLoaderError] = useState('');
   const [gameLoading, setGameLoading] = useState(false);
   const [loaderLoading, setLoaderLoading] = useState(false);
+  const [loaderLoaded, setLoaderLoaded] = useState(false);
   useEffect(() => {
     const request = new AbortController(); setGameLoading(true); setGameError('');
     api<VersionList>('/admin/versions/minecraft', { signal: request.signal }).then(setGameList)
@@ -72,12 +73,13 @@ export function VersionFields({ value, change, disabled }: { value: PanelConfig;
     return () => request.abort();
   }, [retry]);
   useEffect(() => {
-    const request = new AbortController(); setLoaderList({ versions: [] }); setLoaderError(''); setLoaderLoading(false);
+    const request = new AbortController(); setLoaderList({ versions: [] }); setLoaderError(''); setLoaderLoading(false); setLoaderLoaded(false);
     if (!value.minecraftVersion.trim()) return;
     // Avoid requests for every keystroke when entering a custom version.
     const timer = window.setTimeout(() => {
       setLoaderLoading(true);
-      api<VersionList>(`/admin/versions/loaders?loader=${value.loader}&minecraft=${encodeURIComponent(value.minecraftVersion.trim())}`, { signal: request.signal }).then(setLoaderList)
+      api<VersionList>(`/admin/versions/loaders?loader=${value.loader}&minecraft=${encodeURIComponent(value.minecraftVersion.trim())}`, { signal: request.signal })
+        .then(list => { setLoaderList(list); setLoaderLoaded(true); })
         .catch(error => { if (!request.signal.aborted) setLoaderError(errorMessage(error)); })
         .finally(() => { if (!request.signal.aborted) setLoaderLoading(false); });
     }, 300);
@@ -90,8 +92,8 @@ export function VersionFields({ value, change, disabled }: { value: PanelConfig;
     <label className="checkbox-field"><input type="checkbox" checked={snapshots} onChange={e => setSnapshots(e.target.checked)} disabled={disabled} />显示快照版本</label>
     <div className="form-columns"><label className="field">模组加载器<select value={value.loader} onChange={e => change({ ...value, loader: e.target.value as PanelConfig['loader'], loaderVersion: null })} disabled={disabled}>{loaders.map(loader => <option key={loader} value={loader}>{loaderNames[loader]}</option>)}</select></label>
       <label className="field">加载器版本 <span className="optional">可选</span><input list={`${id}-loader`} value={value.loaderVersion ?? ''} onChange={e => change({ ...value, loaderVersion: e.target.value || null })} placeholder="不指定版本" maxLength={100} disabled={disabled} /></label></div>
-    <datalist id={`${id}-loader`}>{loaderList.versions.map(v => <option key={v.id} value={v.id} />)}</datalist>
-    <div className="version-status" aria-live="polite">{(gameLoading || loaderLoading) && <p>正在获取在线版本…</p>}{(gameList.stale || loaderList.stale) && <p>在线版本源暂不可用，正在使用缓存列表。</p>}{gameError && <p>{gameError}</p>}{loaderError && <p>{loaderError}</p>}{!gameError && !loaderError && <p>支持直接输入版本号；加载器版本留空表示不指定版本。</p>}</div>
+    <datalist id={`${id}-loader`}>{loaderList.versions.map(v => <option key={v.id} value={v.id} label={v.type ? '测试版' : undefined} />)}</datalist>
+    <div className="version-status" aria-live="polite">{(gameLoading || loaderLoading) && <p>正在获取在线版本…</p>}{(gameList.stale || loaderList.stale) && <p>在线版本源暂不可用，正在使用缓存列表。</p>}{gameError && <p>{gameError}</p>}{loaderError && <p>{loaderError}</p>}{loaderLoaded && !loaderList.versions.length && <p>该 Minecraft 版本暂无 {loaderNames[value.loader]} 在线构建，可手动输入版本号。</p>}{!gameError && !loaderError && <p>支持直接输入版本号；加载器版本留空表示不指定版本。</p>}</div>
   </div>;
 }
 
