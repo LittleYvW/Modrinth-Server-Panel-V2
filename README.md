@@ -64,7 +64,7 @@ npm start
 
 ## 模组识别、分类与开关
 
-前后台固定显示**双端、服务端、客户端**三个列表。面板扫描模组目录根层级和其中的 `client-only` 子目录，只处理 `.jar` 与 `.jar.disabled`，不递归其他目录，也不跟随符号链接。
+前后台固定显示**双端、服务端、客户端**三个列表。面板扫描模组目录根层级和其中的 `client-only` 子目录，只处理 `.jar` 与 `.jar.disabled`，不递归其他目录，也不跟随符号链接。列表按文件修改时间排序，最新的在前，时间相同再按名称；开关和改分类只改名或移动文件，不改变顺序。
 
 **识别与分类**：文件稳定 1 秒后计算 SHA-512，批量提交 [Modrinth 哈希接口](https://docs.modrinth.com/api/operations/versionsfromhashes/)匹配具体版本。分类优先取版本的 `environment`，其次取项目的 `environment`，再退回旧的 `client_side`／`server_side` [字段](https://docs.modrinth.com/api/operations/getproject/)：
 

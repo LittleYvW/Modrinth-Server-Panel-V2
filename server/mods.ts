@@ -517,7 +517,9 @@ export async function createModService(options: {
   }
   const publicSides = () => modSides.filter(side => side === 'both'
     || (side === 'server' ? display.showServerMods : display.showClientMods));
-  const ordered = () => [...entries].sort((a, b) => displayName(a).localeCompare(displayName(b), 'zh-Hans-CN') || a.fileName.localeCompare(b.fileName));
+  // Newest file first; renames and moves keep the modification time, so toggling or recategorising does not reorder.
+  const ordered = () => [...entries].sort((a, b) => b.mtimeMs - a.mtimeMs
+    || displayName(a).localeCompare(displayName(b), 'zh-Hans-CN') || a.fileName.localeCompare(b.fileName));
 
   function downloadAddress(value: unknown) {
     if (value === null || value === '') return null;

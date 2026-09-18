@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { createModService, CLIENT_DIRECTORY, type ModService } from './mods.js';
 import { classify, legacySide, projectEnvironmentSide, type Modrinth, type ModrinthProject, type ModrinthVersion } from './modrinth.js';
@@ -117,6 +117,8 @@ describe('scanning, categories and the switch', () => {
     await writeFile(join(mods, 'lithium.jar'), 'lithium');
     await writeFile(join(mods, 'mystery.jar'), 'mystery');
     await writeFile(join(mods, 'paused.jar.disabled'), 'paused');
+    const same = new Date('2026-01-01T00:00:00Z');
+    for (const file of ['sodium.jar', 'lithium.jar', 'mystery.jar', 'paused.jar.disabled']) await utimes(join(mods, file), same, same);
     await start({
       versions: { [sha512('sodium')]: version('v1', 'p1', sha512('sodium'), { environment: 'client_only' }), [sha512('lithium')]: version('v2', 'p2', sha512('lithium'), { environment: 'server_only' }) },
       projects: { p1: project('p1'), p2: project('p2') },
@@ -130,6 +132,19 @@ describe('scanning, categories and the switch', () => {
     expect(await names(CLIENT_DIRECTORY)).toEqual(['sodium.jar']);
     expect(service.publicList().mods.map(mod => mod.name)).toEqual(['mystery', 'Project p1', 'Project p2']);
     expect(JSON.stringify(service.publicList())).not.toContain(mods);
+  });
+
+  it('orders the list by file modification time, newest first, and keeps the order across a switch', async () => {
+    const times = { 'old.jar': '2026-01-01', 'new.jar': '2026-03-01', 'middle.jar': '2026-02-01' };
+    for (const [file, time] of Object.entries(times)) {
+      await writeFile(join(mods, file), file);
+      await utimes(join(mods, file), new Date(time), new Date(time));
+    }
+    await start();
+    expect(admin().map(mod => mod.fileName)).toEqual(['new.jar', 'middle.jar', 'old.jar']);
+    expect(service.publicList().mods.map(mod => mod.name)).toEqual(['new', 'middle', 'old']);
+    await service.update(admin().find(mod => mod.fileName === 'new.jar')!.id, { enabled: false });
+    expect(admin().map(mod => mod.name)).toEqual(['new', 'middle', 'old']);
   });
 
   it.each([['both'], ['server'], ['client']] as const)('keeps the switch across a manual move to %s and back', async side => {
@@ -194,7 +209,7 @@ describe('scanning, categories and the switch', () => {
     await writeFile(join(mods, 'a.jar'), 'root');
     await writeFile(join(mods, CLIENT_DIRECTORY, 'a.jar'), 'client');
     await start();
-    const rootEntry = admin().find(mod => mod.id === admin()[0].id)!;
+    const rootEntry = admin().find(mod => mod.side === 'both')!;
     await expect(service.update(rootEntry.id, { side: 'client' })).rejects.toMatchObject({ status: 409 });
     expect(await readFile(join(mods, 'a.jar'), 'utf8')).toBe('root');
     expect(await readFile(join(mods, CLIENT_DIRECTORY, 'a.jar'), 'utf8')).toBe('client');
