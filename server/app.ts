@@ -12,7 +12,9 @@ import { errorCode, HttpError, isPermissionError } from './errors.js';
 
 type Options = {
   dataDirectory: string;
+  adminPassword: string;
   publicOrigin?: string;
+  trustProxy?: string;
   staticDirectory?: string;
   versions?: ReturnType<typeof createVersionService>;
   listDirectory?: typeof readDirectory;
@@ -22,13 +24,16 @@ type Options = {
   pollInterval?: number;
   settleDelay?: number;
 };
-type Session = { expires: number; adminHash: string; checkedDirectories: Set<string> };
+type Session = { expires: number; checkedDirectories: Set<string> };
 const COOKIE = 'server_mods_session';
 const SESSION_AGE = 24 * 60 * 60 * 1000;
 const ATTEMPT_LIMIT = 10;
 const ATTEMPT_WINDOW = 15 * 60 * 1000;
 
 export async function createApp(options: Options) {
+  // The password lives only in the environment; changing it means a restart, which also ends every session.
+  validatePassword(options.adminPassword);
+  const admin = await hashPassword(options.adminPassword);
   const store = await createStore(options.dataDirectory);
   const versions = options.versions ?? createVersionService();
   const mods = await createModService({
@@ -41,6 +46,9 @@ export async function createApp(options: Options) {
   const attempts = new Map<string, { count: number; until: number }>();
   const app = express();
   app.disable('x-powered-by');
+  // Behind a reverse proxy every peer is the proxy itself, so rate limits would be shared by all clients.
+  // Forwarded addresses are only believed from the configured proxy; anyone else could forge them.
+  if (options.publicOrigin) app.set('trust proxy', options.trustProxy ?? 'loopback');
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   app.use('/api', (req, _res, next) => {
     for (const [key, value] of sessions) if (value.expires <= now()) sessions.delete(key);
@@ -60,8 +68,7 @@ export async function createApp(options: Options) {
   }
   function session(req: Request) {
     const key = token(req);
-    const value = key ? sessions.get(key) : undefined;
-    return value?.adminHash === store.read().admin?.hash ? value : undefined;
+    return key ? sessions.get(key) : undefined;
   }
   function requireSession(req: Request, _res?: Response, next?: NextFunction) {
     const value = session(req);
@@ -76,7 +83,7 @@ export async function createApp(options: Options) {
     const previous = token(req);
     if (previous) sessions.delete(previous);
     const key = randomBytes(32).toString('hex');
-    sessions.set(key, { expires: now() + SESSION_AGE, adminHash: store.read().admin!.hash, checkedDirectories: new Set() });
+    sessions.set(key, { expires: now() + SESSION_AGE, checkedDirectories: new Set() });
     res.cookie(COOKIE, key, { ...cookieOptions(req), maxAge: SESSION_AGE });
   }
   function throttle(req: Request, res: Response, next: NextFunction) {
@@ -97,25 +104,11 @@ export async function createApp(options: Options) {
     attempts.delete(req.ip ?? 'unknown');
   }
   function status(req: Request) {
-    const state = store.read();
-    return { registered: !!state.admin, authenticated: !!session(req), configured: !!state.config };
+    return { authenticated: !!session(req), configured: !!store.read().config };
   }
   app.get('/api/auth/status', (req, res) => res.json(status(req)));
-  app.post('/api/auth/register', throttle, async (req, res) => {
-    const password: unknown = req.body?.password;
-    validatePassword(password);
-    await store.update(async state => {
-      if (state.admin) { recordFailure(req); throw new HttpError(409, '管理员密码已创建，请登录。'); }
-      return { ...state, admin: await hashPassword(password) };
-    });
-    clearFailures(req);
-    issueSession(req, res);
-    res.status(201).json({ ...status(req), authenticated: true });
-  });
   app.post('/api/auth/login', throttle, async (req, res) => {
-    const admin = store.read().admin;
-    if (!admin) throw new HttpError(409, '请先注册管理员密码。');
-    if (!await verifyPassword(req.body?.password, admin) || store.read().admin !== admin) {
+    if (!await verifyPassword(req.body?.password, admin)) {
       recordFailure(req);
       throw new HttpError(401, '密码不正确，请重试。');
     }
@@ -125,24 +118,6 @@ export async function createApp(options: Options) {
   });
   app.post('/api/auth/logout', requireSession, (req, res) => {
     sessions.delete(token(req)!);
-    res.clearCookie(COOKIE, cookieOptions(req));
-    res.json({ ok: true });
-  });
-  app.put('/api/auth/password', requireSession, throttle, async (req, res) => {
-    const password: unknown = req.body?.newPassword;
-    validatePassword(password);
-    await store.update(async state => {
-      requireSession(req);
-      if (!state.admin || !await verifyPassword(req.body?.currentPassword, state.admin)) {
-        recordFailure(req);
-        throw new HttpError(400, '当前密码不正确。');
-      }
-      const admin = await hashPassword(password);
-      requireSession(req);
-      return { ...state, admin };
-    });
-    clearFailures(req);
-    sessions.clear();
     res.clearCookie(COOKIE, cookieOptions(req));
     res.json({ ok: true });
   });

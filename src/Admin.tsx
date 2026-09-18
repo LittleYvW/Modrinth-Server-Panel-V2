@@ -1,14 +1,14 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, Check, File, Folder, KeyRound, LoaderCircle, Moon, RefreshCw, Sun } from 'lucide-react';
 import { loaders, loaderNames, type AuthStatus, type DirectoryListing, type DisplaySettings, type PanelConfig, type VersionList } from '../shared/types';
-import { api, ApiError, errorMessage } from './api';
+import { api, errorMessage } from './api';
 import Modal from './Modal';
 import type { DialogTransition } from './useDialogTransition';
 
-export function AuthDialog({ close, authenticated, transition }: { close: () => void; authenticated: (status: AuthStatus) => void; transition?: DialogTransition }) {
+// `close` is omitted while the panel is not yet set up: signing in is then the only way forward.
+export function AuthDialog({ close, authenticated, transition }: { close?: () => void; authenticated: (status: AuthStatus) => void; transition?: DialogTransition }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
@@ -30,34 +30,26 @@ export function AuthDialog({ close, authenticated, transition }: { close: () => 
       if (result.authenticated) accept(result);
     }).catch(error => { if (!request.signal.aborted) setError(errorMessage(error)); });
   };
-  useEffect(() => { load(); return () => controller.current?.abort(); }, []); // Initial status determines registration vs login.
+  useEffect(() => { load(); return () => controller.current?.abort(); }, []); // An existing session skips the password.
   useEffect(() => { if (status) passwordRef.current?.focus(); }, [status]);
-  const register = status && !status.registered;
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!status || busy || accepted.current || transition) return;
-    if (register && password !== confirm) { setError('两次输入的密码不一致。'); return; }
     setBusy(true); setError('');
     const request = new AbortController(); controller.current = request;
     try {
-      const result = await api<AuthStatus>(register ? '/auth/register' : '/auth/login', { method: 'POST', body: JSON.stringify({ password }), signal: request.signal });
+      const result = await api<AuthStatus>('/auth/login', { method: 'POST', body: JSON.stringify({ password }), signal: request.signal });
       if (!request.signal.aborted) accept(result);
     } catch (error) {
-      if (request.signal.aborted) return;
-      if (error instanceof ApiError && error.status === 409) {
-        try { setStatus(await api<AuthStatus>('/auth/status', { signal: request.signal })); setConfirm(''); }
-        catch { /* Preserve original conflict message; retry remains available. */ }
-      }
-      setError(errorMessage(error));
+      if (!request.signal.aborted) setError(errorMessage(error));
     } finally { setBusy(false); }
   }
-  return <Modal title={status ? register ? '管理员注册' : '管理员登录' : '管理员验证'} kicker="ADMIN ACCESS" close={close} entrance transition={transition} onCloseStart={() => { accepted.current = true; controller.current?.abort(); }}>
+  return <Modal title={status ? '管理员登录' : '管理员验证'} kicker="ADMIN ACCESS" close={close} entrance transition={transition} onCloseStart={() => { accepted.current = true; controller.current?.abort(); }}>
     {!status ? <div className="form-intro"><p>{error || '正在连接管理服务…'}</p>{error && <button className="secondary-button" onClick={load}>重试</button>}</div> : <form className="admin-form" onSubmit={submit}>
-      <p className="form-description">{register ? '首次使用，请创建管理员密码，开启你的模组工作空间。' : '输入管理员密码，继续管理你的模组工作空间。'}</p>
-      <label className="field">{register ? '设置密码' : '管理员密码'}<input ref={passwordRef} type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={register ? 8 : undefined} maxLength={256} required value={password} onChange={e => setPassword(e.target.value)} placeholder={register ? '至少 8 个字符' : '输入密码'} disabled={busy} /></label>
-      {register && <label className="field">确认密码<input type="password" autoComplete="new-password" minLength={8} maxLength={256} required value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="再次输入密码" disabled={busy} /></label>}
+      <p className="form-description">{close ? '输入管理员密码，继续管理你的模组工作空间。' : '面板尚未完成设置，请输入管理员密码开始引导。密码由服务器环境变量 ADMIN_PASSWORD 设置。'}</p>
+      <label className="field">管理员密码<input ref={passwordRef} type="password" autoComplete="current-password" maxLength={256} required value={password} onChange={e => setPassword(e.target.value)} placeholder="输入密码" disabled={busy} /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="done-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18} /> : <KeyRound size={18} />}{busy ? '正在验证…' : register ? '注册' : '登录'}</button>
+      <button className="done-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18} /> : <KeyRound size={18} />}{busy ? '正在验证…' : '登录'}</button>
     </form>}
   </Modal>;
 }
@@ -163,23 +155,6 @@ export function ConfigForm({ initial, saved, wizard = false }: { initial?: Panel
   </form>;
 }
 
-function PasswordForm({ changed }: { changed: () => void }) {
-  const [currentPassword, setCurrent] = useState(''); const [newPassword, setNew] = useState(''); const [confirm, setConfirm] = useState('');
-  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
-  async function submit(event: FormEvent) {
-    event.preventDefault(); if (busy) return;
-    if (newPassword !== confirm) { setError('两次输入的新密码不一致。'); return; }
-    setBusy(true); setError('');
-    try { await api('/auth/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }); changed(); }
-    catch (error) { setError(errorMessage(error)); } finally { setBusy(false); }
-  }
-  return <form className="admin-form password-form" onSubmit={submit}><h3>修改管理员密码</h3><p className="form-description">更新后需要重新登录。</p>
-    <label className="field">当前密码<input type="password" autoComplete="current-password" required value={currentPassword} onChange={e => setCurrent(e.target.value)} disabled={busy} /></label>
-    <div className="form-columns"><label className="field">新密码<input type="password" autoComplete="new-password" minLength={8} maxLength={256} placeholder="至少 8 个字符" required value={newPassword} onChange={e => setNew(e.target.value)} disabled={busy} /></label><label className="field">确认新密码<input type="password" autoComplete="new-password" minLength={8} maxLength={256} required value={confirm} onChange={e => setConfirm(e.target.value)} disabled={busy} /></label></div>
-    {error && <p className="form-error" role="alert">{error}</p>}<button className="secondary-button" disabled={busy}>{busy ? '正在更新…' : '更新密码'}</button>
-  </form>;
-}
-
 const displayOptions: { key: keyof DisplaySettings; title: string; description: string }[] = [
   { key: 'showServerMods', title: '显示服务端模组', description: '关闭后前台隐藏服务端模组分类，且不再提供其下载' },
   { key: 'showClientMods', title: '显示客户端模组', description: '关闭后前台隐藏客户端模组分类，且不再提供其下载' },
@@ -208,14 +183,13 @@ function DisplayForm() {
   </section>;
 }
 
-export function SettingsDialog({ config, close, saved, theme, toggleTheme, passwordChanged }: {
-  config: PanelConfig; close: () => void; saved: (value: PanelConfig) => void; theme: 'dark' | 'light'; toggleTheme: () => void; passwordChanged: () => void;
+export function SettingsDialog({ config, close, saved, theme, toggleTheme }: {
+  config: PanelConfig; close: () => void; saved: (value: PanelConfig) => void; theme: 'dark' | 'light'; toggleTheme: () => void;
 }) {
   return <Modal title="后台设置" kicker="WORKSPACE SETTINGS" close={close} wide>
     <ConfigForm initial={config} saved={saved} />
     <DisplayForm />
     <div className="setting-row"><div><h3>界面主题</h3><p>保存在当前浏览器中</p></div><button className="theme-choice" onClick={toggleTheme}>{theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}{theme === 'dark' ? '深色' : '浅色'}</button></div>
-    <PasswordForm changed={passwordChanged} />
     <button className="text-button cancel-settings" onClick={close}>取消并关闭</button>
   </Modal>;
 }

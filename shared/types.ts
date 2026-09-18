@@ -12,7 +12,7 @@ export type PanelConfig = {
 export type PublicConfig = Omit<PanelConfig, 'modsDirectory'> & {
   minecraftVersionType?: 'release' | 'snapshot' | null;
 };
-export type AuthStatus = { registered: boolean; authenticated: boolean; configured: boolean };
+export type AuthStatus = { authenticated: boolean; configured: boolean };
 export type DirectoryListing = {
   path: string;
   entries: { name: string; type: 'file' | 'directory' | 'link' | 'other' }[];

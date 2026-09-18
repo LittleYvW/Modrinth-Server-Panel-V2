@@ -8,7 +8,6 @@ import type { PanelConfig } from '../shared/types';
 
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(), api: vi.fn() }));
 const config: PanelConfig = { modsDirectory: '/mods', minecraftVersion: '1.20.1', loader: 'fabric', loaderVersion: null };
-let registered: boolean;
 let authenticated: boolean;
 let reduced: boolean;
 let panel: PanelConfig | null;
@@ -16,7 +15,7 @@ let panelLeft: number;
 
 beforeEach(() => {
   vi.useFakeTimers();
-  registered = true; authenticated = false; reduced = false; panel = config; panelLeft = 80;
+  authenticated = false; reduced = false; panel = config; panelLeft = 80;
   window.history.replaceState(null, '', '/');
   document.body.style.overflow = '';
   vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: reduced, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
@@ -27,10 +26,11 @@ beforeEach(() => {
     const dialog = this.tagName === 'DIALOG';
     return { left: dialog ? 400 : panelLeft, top: dialog ? 250 : 120, width: dialog ? 460 : 1100, height: dialog ? 340 : 600, right: 0, bottom: 0, x: 0, y: 0, toJSON() {} };
   });
-  vi.mocked(api).mockReset().mockImplementation(async path => {
-    if (path === '/auth/status') return { registered, authenticated, configured: !!panel };
-    if (path === '/auth/login' || path === '/auth/register') return { registered: true, authenticated: true, configured: !!panel };
-    if (path === '/admin/config') return panel;
+  vi.mocked(api).mockReset().mockImplementation(async (path, options) => {
+    if (path === '/auth/status') return { authenticated, configured: !!panel };
+    if (path === '/auth/login') return { authenticated: true, configured: !!panel };
+    if (path === '/admin/config') return options?.method === 'PUT' ? JSON.parse(options.body as string) : panel;
+    if (path === '/admin/directory/check') return { path: '/mods', entries: [], writable: true };
     if (path === '/public/config') return null;
     if (path === '/public/mods' || path === '/admin/mods') return { revision: 1, mods: [], scanning: false, configured: true, issues: [] };
     if (path === '/auth/logout') return {};
@@ -39,13 +39,14 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+// An unconfigured panel opens the dialog by itself; otherwise it is reached through “管理”.
 async function openDialog() {
   await act(async () => { render(<App />); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '管理' })); });
+  const manage = screen.queryByRole('button', { name: '管理' });
+  if (manage) await act(async () => { fireEvent.click(manage); });
 }
 async function submit() {
-  fireEvent.change(screen.getByLabelText(registered ? '管理员密码' : '设置密码'), { target: { value: 'test-password' } });
-  if (!registered) fireEvent.change(screen.getByLabelText('确认密码'), { target: { value: 'test-password' } });
+  fireEvent.change(screen.getByLabelText('管理员密码'), { target: { value: 'test-password' } });
   await act(async () => { fireEvent.submit(document.querySelector('.admin-form')!); });
 }
 async function advance(ms = 800) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
@@ -123,8 +124,7 @@ describe('authentication handoff', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it.each([true, false])('morphs after authentication (registered=%s), keeps particles mounted and transfers focus', async existing => {
-    registered = existing;
+  it.each([true, false])('morphs after authentication (configured=%s), keeps particles mounted and transfers focus', async existing => {
     panel = existing ? config : null;
     await openDialog();
     const particles = document.querySelector('.floating-pixels');
@@ -138,7 +138,7 @@ describe('authentication handoff', () => {
     fireEvent.click(dialog);
     fireEvent.submit(document.querySelector('.auth-dialog form')!);
     expect(dialog).toBeInTheDocument();
-    expect(vi.mocked(api).mock.calls.filter(([path]) => path === (existing ? '/auth/login' : '/auth/register'))).toHaveLength(1);
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/auth/login')).toHaveLength(1);
     await advance(360);
     expect(parseFloat(dialog.style.width)).toBeGreaterThan(460);
     expect(parseFloat(dialog.style.left)).toBeLessThan(400);
@@ -230,17 +230,70 @@ describe('authentication handoff', () => {
     expect(document.body.style.overflow).toBe('');
     expect(document.querySelector('.admin-content')).not.toBeInTheDocument();
   });
+});
 
-  it('keeps the login dialog open after changing the password in settings', async () => {
+describe('initial setup', () => {
+  const hero = () => screen.queryByRole('region', { name: '整合包版本' });
+  it('holds the home page until the status is known and falls back to it when the status fails', async () => {
+    let reject!: (error: Error) => void;
+    const implementation = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation((path, options) => path === '/auth/status' ? new Promise((_, fail) => { reject = fail; }) : implementation(path, options));
+    await act(async () => { render(<App />); });
+    expect(hero()).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '管理' })).not.toBeInTheDocument();
+    await act(async () => { reject(new Error('无法连接服务')); });
+    expect(hero()).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '管理' })).toBeInTheDocument();
+  });
+
+  it('opens a mandatory sign-in instead of the home page while unconfigured', async () => {
+    panel = null;
+    await act(async () => { render(<App />); });
+    const dialog = screen.getByRole('dialog', { name: '管理员登录' });
+    expect(hero()).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '管理' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '关闭管理员登录' })).not.toBeInTheDocument();
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    fireEvent.click(dialog);
+    await advance(350);
+    expect(dialog).toBeInTheDocument();
+  });
+
+  it('continues an existing session straight into the wizard', async () => {
+    panel = null; authenticated = true;
+    await act(async () => { render(<App />); });
+    await advance();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '让世界准备就绪。' })).toBeInTheDocument();
+  });
+
+  it('reopens the mandatory sign-in after logging out of the wizard', async () => {
+    panel = null;
     await openDialog(); await submit(); await advance();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '设置' })); });
-    expect(screen.getByRole('dialog', { name: '后台设置' })).not.toHaveClass('auth-dialog');
-    fireEvent.change(screen.getByLabelText('当前密码'), { target: { value: 'test-password' } });
-    fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'next-password' } });
-    fireEvent.change(screen.getByLabelText('确认新密码'), { target: { value: 'next-password' } });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '更新密码' })); });
-    await advance(50);
+    expect(screen.getByRole('link', { name: 'Server Mods 首页' })).toHaveAttribute('href', '#/admin');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '退出' })); });
     expect(screen.getByRole('dialog', { name: '管理员登录' })).toBeInTheDocument();
-    expect(screen.getByLabelText('管理员密码')).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '关闭管理员登录' })).not.toBeInTheDocument();
+    expect(hero()).not.toBeInTheDocument();
+  });
+
+  it('stays in the manager after the wizard and opens the home page from then on', async () => {
+    panel = null;
+    await openDialog(); await submit(); await advance();
+    fireEvent.change(screen.getByLabelText('模组目录'), { target: { value: '/mods' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '检查' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '确认' })); });
+    fireEvent.change(screen.getByLabelText('Minecraft 版本'), { target: { value: '1.20.1' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '完成配置' })); });
+    expect(screen.getByRole('heading', { name: '模组管理器' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Server Mods 首页' })).toHaveAttribute('href', '#');
+    await act(async () => {
+      window.history.replaceState(null, '', '/');
+      window.dispatchEvent(new Event('hashchange'));
+    });
+    expect(hero()).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '管理' })).toBeInTheDocument();
   });
 });

@@ -74,9 +74,6 @@ button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
 .secondary-button:hover { border-color:var(--green); }
 .settings-dialog.wide-dialog { width:640px; max-height:calc(100dvh - 40px); overflow:auto; }
 .settings-dialog { max-height:calc(100dvh - 40px); }
-.password-form h3 { font-size:14px; font-weight:500; }
-.password-form .form-description { margin-top:-12px; font-size:11px; }
-.password-form>.secondary-button { align-self:flex-start; }
 .cancel-settings { width:100%; color:var(--muted); margin-top:25px; }
 .manager-workspace { min-height:calc(100dvh - 220px); border:1px solid var(--line); border-radius:15px; background:var(--surface); box-shadow:var(--shadow); backdrop-filter:blur(18px); }
 .workspace-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:20px; padding:26px 30px; border-bottom:1px solid var(--line); }

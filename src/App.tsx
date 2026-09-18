@@ -13,12 +13,13 @@ function readTheme(): Theme {
   try { return localStorage.getItem('server-mods-theme') === 'light' ? 'light' : 'dark'; }
   catch { return 'dark'; }
 }
-function Header({ theme, toggleTheme, manage, admin, configured, logout, busy, expanding, revealed }: {
-  theme: Theme; toggleTheme: () => void; manage: () => void; admin: boolean; configured: boolean; logout: () => void; busy: boolean; expanding: boolean; revealed: boolean;
+function Header({ theme, toggleTheme, manage, admin, configured, home, logout, busy, expanding, revealed }: {
+  theme: Theme; toggleTheme: () => void; manage: () => void; admin: boolean; configured: boolean; home: boolean; logout: () => void; busy: boolean; expanding: boolean; revealed: boolean;
 }) {
-  return <header className="header"><div className="header-inner"><a className="brand" href="#" aria-label="Server Mods 首页"><Cube /><span>Server Mods</span></a><div className="header-actions">
+  // Until setup is complete there is no home page to return to, so the brand stays in the workspace.
+  return <header className="header"><div className="header-inner"><a className="brand" href={home ? '#' : '#/admin'} aria-label="Server Mods 首页"><Cube /><span>Server Mods</span></a><div className="header-actions">
     <div className="management-controls">
-      {(!admin || expanding) && <button className={`manage-button${expanding ? ' management-leaving' : ''}`} onClick={manage} disabled={expanding}><Settings size={18} /><span>管理</span></button>}
+      {home && (!admin || expanding) && <button className={`manage-button${expanding ? ' management-leaving' : ''}`} onClick={manage} disabled={expanding}><Settings size={18} /><span>管理</span></button>}
       {admin && <div className={`admin-controls${expanding ? ' controls-preparing' : revealed ? ' controls-revealed' : ''}`} aria-hidden={expanding || undefined} inert={expanding}>
         <button className="manage-button" onClick={manage} disabled={!configured || busy}><Settings size={18} /><span>设置</span></button>
         <button className="manage-button" onClick={logout} disabled={busy}><LogOut size={18} /><span>退出</span></button>
@@ -36,6 +37,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [route, setRoute] = useState(window.location.hash);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [statusFailed, setStatusFailed] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authAttempt, setAuthAttempt] = useState(0);
   const [transition, setTransition] = useState<'idle' | 'expanding' | 'revealed'>('idle');
@@ -51,6 +53,10 @@ export default function App() {
   const isAdminRoute = route === '#/admin';
   const admin = isAdminRoute && !!auth?.authenticated;
   const expanding = transition === 'expanding';
+  // An unconfigured panel has nothing to show visitors: it opens straight into sign-in and the setup wizard.
+  // The home page waits for the status so it never flashes first; if the status cannot be read, it is shown as before.
+  const setup = auth ? !auth.configured : false;
+  const home = auth ? auth.configured : statusFailed;
   const handoffActive = useRef(false);
   handoffActive.current = expanding;
   const notify = (name: string, text: string, tone: Tone = 'success') => setToast({ name, text, tone, id: Date.now() });
@@ -83,7 +89,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     const request = new AbortController();
-    api<AuthStatus>('/auth/status', { signal: request.signal }).then(result => setAuth(current => current ?? result)).catch(() => { /* Auth dialog offers retry. */ });
+    api<AuthStatus>('/auth/status', { signal: request.signal }).then(result => setAuth(current => current ?? result))
+      .catch(() => { if (!request.signal.aborted) setStatusFailed(true); /* Auth dialog offers retry. */ });
     return () => request.abort();
   }, []);
   useEffect(() => {
@@ -93,8 +100,8 @@ export default function App() {
     return () => { request.abort(); window.removeEventListener('focus', refresh); };
   }, [route]);
   useEffect(() => {
-    if (isAdminRoute && !auth?.authenticated) setAuthOpen(true);
-  }, [isAdminRoute, auth?.authenticated]);
+    if (setup ? !admin : isAdminRoute && !auth?.authenticated) setAuthOpen(true);
+  }, [setup, admin, isAdminRoute, auth?.authenticated]);
   useEffect(() => {
     if (!auth?.authenticated) return;
     const request = new AbortController(); setError(''); setConfig(undefined);
@@ -141,17 +148,17 @@ export default function App() {
     if (admin) setSettings(true);
     else setAuthOpen(true);
   }
-  return <><div className="navigation-layer" inert={expanding}><Header theme={theme} toggleTheme={toggleTheme} manage={manage} admin={admin} configured={!!config} logout={logout} busy={busy} expanding={expanding} revealed={transition === 'revealed'} /></div>
+  return <><div className="navigation-layer" inert={expanding}><Header theme={theme} toggleTheme={toggleTheme} manage={manage} admin={admin} configured={!!config} home={home} logout={logout} busy={busy} expanding={expanding} revealed={transition === 'revealed'} /></div>
     <main className={admin ? 'admin-main' : undefined}><Artwork simple={admin} />
       {admin && <div ref={adminContent} className={`admin-content${expanding ? ' admin-preparing' : transition === 'revealed' ? ' admin-revealed' : ''}`} inert={expanding} aria-hidden={expanding || undefined} tabIndex={-1}>
         {config === undefined ? <div className="setup-panel loading-panel">{error ? <><p className="form-error" role="alert">{error}</p><button className="secondary-button" onClick={() => setRetry(n => n + 1)}>重试</button></> : <><LoaderCircle className="spin" size={24} /><p>正在加载工作空间…</p></>}</div>
           : config === null ? <section className="setup-panel"><div className="workspace-intro"><span className="section-kicker">WELCOME TO YOUR WORKSPACE</span><h1>让世界准备就绪。</h1><p>完成两个简单设置，开始管理你的模组。</p></div><ConfigForm wizard saved={onSaved} /></section>
             : <section className="manager-workspace" aria-labelledby="manager-title"><div className="workspace-heading"><div><span className="section-kicker">YOUR WORKSPACE</span><h1 id="manager-title">模组管理器</h1></div><span className="environment-badge">Minecraft {config.minecraftVersion}<span />{loaderNames[config.loader]}{config.loaderVersion ? ` ${config.loaderVersion}` : ''}</span></div><AdminMods notify={notify} /></section>}
       </div>}
-      {(!admin || expanding) && <div className={`main-content${expanding ? ' home-leaving' : ''}`} inert={expanding} aria-hidden={expanding || undefined}><Hero config={publicConfig} /><PublicMods active={!isAdminRoute} /><footer><span className="status-dot" />为更好的游戏体验而构建<span className="footer-separator">/</span><span>保持原版，探索更多。</span></footer></div>}
+      {home && (!admin || expanding) && <div className={`main-content${expanding ? ' home-leaving' : ''}`} inert={expanding} aria-hidden={expanding || undefined}><Hero config={publicConfig} /><PublicMods active={!isAdminRoute} /><footer><span className="status-dot" />为更好的游戏体验而构建<span className="footer-separator">/</span><span>保持原版，探索更多。</span></footer></div>}
     </main>
-    {authOpen && <AuthDialog key={authAttempt} close={() => { setAuthOpen(false); if (isAdminRoute && !auth?.authenticated) window.location.hash = ''; }} authenticated={onAuthenticated} transition={expanding ? { target: adminContent, complete: finishAuthTransition } : undefined} />}
-    {settings && config && <SettingsDialog config={config} close={() => setSettings(false)} saved={onSaved} theme={theme} toggleTheme={toggleTheme} passwordChanged={() => { signedOut(); setAuthOpen(true); notify('密码已更新', '请使用新密码重新登录。'); }} />}
+    {authOpen && <AuthDialog key={authAttempt} close={setup ? undefined : () => { setAuthOpen(false); if (isAdminRoute && !auth?.authenticated) window.location.hash = ''; }} authenticated={onAuthenticated} transition={expanding ? { target: adminContent, complete: finishAuthTransition } : undefined} />}
+    {settings && config && <SettingsDialog config={config} close={() => setSettings(false)} saved={onSaved} theme={theme} toggleTheme={toggleTheme} />}
     <div className="toast-region" role="status" aria-live="polite">{toast && <div className={`toast toast-${toast.tone}`} key={toast.id}>{toast.tone === 'error' ? <TriangleAlert size={22} /> : <CheckCheck size={22} />}<div><strong>{toast.name}</strong><p>{toast.text}</p></div><button aria-label="关闭提示" onClick={() => setToast(null)}><X size={18} /></button></div>}</div>
   </>;
 }

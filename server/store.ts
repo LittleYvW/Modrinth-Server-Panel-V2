@@ -8,7 +8,7 @@ import { dataWriteProblem, HttpError } from './errors.js';
 const deriveKey = promisify(scrypt);
 export type PasswordHash = { salt: string; hash: string };
 // `display` arrived after version 1 shipped, so older files simply lack it.
-type State = { version: 1; admin: PasswordHash | null; config: PanelConfig | null; display?: DisplaySettings };
+type State = { version: 1; config: PanelConfig | null; display?: DisplaySettings };
 
 export function validatePassword(value: unknown): asserts value is string {
   if (typeof value !== 'string' || value.length < 8 || value.length > 256) {
@@ -30,12 +30,12 @@ export async function verifyPassword(password: unknown, saved: PasswordHash) {
 export async function createStore(directory: string) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const filename = join(directory, 'panel.json');
-  let state: State = { version: 1, admin: null, config: null };
+  let state: State = { version: 1, config: null };
   try {
-    const saved = JSON.parse(await readFile(filename, 'utf8')) as State;
-    if (saved.version !== 1 || !('admin' in saved) || !('config' in saved)
-      || (saved.admin && (!/^[a-f0-9]{32}$/.test(saved.admin.salt) || !/^[a-f0-9]{128}$/.test(saved.admin.hash)))
-      || (saved.config && (!saved.admin || typeof saved.config.modsDirectory !== 'string'
+    // Older files also hold an administrator hash; the password now comes from the environment, so it is dropped on the next write.
+    const { admin: _legacy, ...saved } = JSON.parse(await readFile(filename, 'utf8')) as State & { admin?: unknown };
+    if (saved.version !== 1 || !('config' in saved)
+      || (saved.config && (typeof saved.config.modsDirectory !== 'string'
         || typeof saved.config.minecraftVersion !== 'string' || !loaders.includes(saved.config.loader)
         || !(saved.config.loaderVersion === null || typeof saved.config.loaderVersion === 'string')))
       || (saved.display !== undefined && (typeof saved.display?.showServerMods !== 'boolean' || typeof saved.display?.showClientMods !== 'boolean'))) {

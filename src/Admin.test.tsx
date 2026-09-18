@@ -19,30 +19,32 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('password-only administrator dialog', () => {
-  it('registers on first use and validates confirmation', async () => {
-    mockedApi.mockResolvedValueOnce({ registered: false, authenticated: false, configured: false });
+  it('signs in with a single password field and displays login errors', async () => {
+    mockedApi.mockResolvedValueOnce({ authenticated: false, configured: true });
     const authenticated = vi.fn(); const user = userEvent.setup();
     render(<AuthDialog close={vi.fn()} authenticated={authenticated} />);
-    await screen.findByRole('dialog', { name: '管理员注册' });
-    await user.type(screen.getByLabelText('设置密码'), 'test-password');
-    await user.type(screen.getByLabelText('确认密码'), 'different-password');
-    await user.click(screen.getByRole('button', { name: '注册' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('不一致');
-    await user.clear(screen.getByLabelText('确认密码')); await user.type(screen.getByLabelText('确认密码'), 'test-password');
-    mockedApi.mockResolvedValueOnce({ registered: true, authenticated: true, configured: false });
-    await user.click(screen.getByRole('button', { name: '注册' }));
-    expect(authenticated).toHaveBeenCalledWith({ registered: true, authenticated: true, configured: false });
-    expect(mockedApi.mock.calls[1][0]).toBe('/auth/register');
-  });
-  it('shows only one password field after registration and displays login errors', async () => {
-    mockedApi.mockResolvedValueOnce({ registered: true, authenticated: false, configured: true });
-    const user = userEvent.setup(); render(<AuthDialog close={vi.fn()} authenticated={vi.fn()} />);
     await screen.findByRole('dialog', { name: '管理员登录' });
-    expect(screen.queryByLabelText('确认密码')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText(/密码/)).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: '注册' })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('管理员密码'), 'wrong-password');
     mockedApi.mockRejectedValueOnce(new Error('密码不正确，请重试。'));
     await user.click(screen.getByRole('button', { name: '登录' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('密码不正确');
+    await user.clear(screen.getByLabelText('管理员密码')); await user.type(screen.getByLabelText('管理员密码'), 'test-password');
+    mockedApi.mockResolvedValueOnce({ authenticated: true, configured: true });
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    expect(authenticated).toHaveBeenCalledWith({ authenticated: true, configured: true });
+    expect(mockedApi.mock.calls.at(-1)![0]).toBe('/auth/login');
+  });
+  it('cannot be dismissed during initial setup', async () => {
+    mockedApi.mockResolvedValueOnce({ authenticated: false, configured: false });
+    render(<AuthDialog authenticated={vi.fn()} />);
+    const dialog = await screen.findByRole('dialog', { name: '管理员登录' });
+    expect(screen.getByText(/ADMIN_PASSWORD/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /关闭/ })).not.toBeInTheDocument();
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    fireEvent.click(dialog);
+    expect(dialog).toBeInTheDocument(); expect(dialog).not.toHaveClass('auth-closing');
   });
 });
 
@@ -101,7 +103,7 @@ describe('directory and version configuration', () => {
   it('cancels a settings draft without submitting it', async () => {
     mockedApi.mockResolvedValue({ versions: [] });
     const close = vi.fn(); const saved = vi.fn(); const user = userEvent.setup();
-    render(<SettingsDialog config={config} close={close} saved={saved} theme="dark" toggleTheme={vi.fn()} passwordChanged={vi.fn()} />);
+    render(<SettingsDialog config={config} close={close} saved={saved} theme="dark" toggleTheme={vi.fn()} />);
     await user.clear(screen.getByLabelText('Minecraft 版本')); await user.type(screen.getByLabelText('Minecraft 版本'), '1.21.1');
     await user.click(screen.getByRole('button', { name: '取消并关闭' }));
     expect(close).toHaveBeenCalled(); expect(saved).not.toHaveBeenCalled();
@@ -113,7 +115,7 @@ describe('directory and version configuration', () => {
       return { versions: [] };
     });
     const user = userEvent.setup();
-    render(<SettingsDialog config={config} close={vi.fn()} saved={vi.fn()} theme="dark" toggleTheme={vi.fn()} passwordChanged={vi.fn()} />);
+    render(<SettingsDialog config={config} close={vi.fn()} saved={vi.fn()} theme="dark" toggleTheme={vi.fn()} />);
     const client = screen.getByRole('switch', { name: '显示客户端模组' });
     await waitFor(() => expect(client).toBeEnabled());
     expect(screen.getByRole('switch', { name: '显示服务端模组' })).toHaveAttribute('aria-checked', 'true');

@@ -3,7 +3,8 @@ import { X } from 'lucide-react';
 import { useDialogTransition, type DialogTransition } from './useDialogTransition';
 
 export default function Modal({ title, kicker, close, children, wide = false, entrance = false, transition, onCloseStart }: {
-  title: string; kicker: string; close: () => void; children: ReactNode; wide?: boolean; entrance?: boolean; transition?: DialogTransition; onCloseStart?: () => void;
+  // Without `close` the dialog is mandatory: no close button, and Escape or the backdrop do nothing.
+  title: string; kicker: string; close?: () => void; children: ReactNode; wide?: boolean; entrance?: boolean; transition?: DialogTransition; onCloseStart?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [closing, setClosing] = useState(false);
@@ -14,7 +15,7 @@ export default function Modal({ title, kicker, close, children, wide = false, en
   const finishClose = () => {
     if (!closeRequested.current || closeFinished.current) return;
     closeFinished.current = true;
-    closeRef.current();
+    closeRef.current?.();
   };
   const handingOff = useRef(false);
   handingOff.current = !!transition;
@@ -37,7 +38,7 @@ export default function Modal({ title, kicker, close, children, wide = false, en
     return () => { clearTimeout(timer); motion?.removeEventListener('change', changed); };
   }, [closing]);
   const requestClose = () => {
-    if (transition || closeRequested.current) return;
+    if (!close || transition || closeRequested.current) return;
     closeRequested.current = true;
     onCloseStart?.();
     if (!entrance || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) finishClose();
@@ -57,6 +58,6 @@ export default function Modal({ title, kicker, close, children, wide = false, en
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }}>
-    <div className="dialog-content" inert={locked}><div className="dialog-heading"><div><span className="section-kicker">{kicker}</span><h2>{title}</h2></div><button type="button" className="icon-button" aria-label={`关闭${title}`} onClick={requestClose} disabled={locked}><X size={20} /></button></div>{children}</div>
+    <div className="dialog-content" inert={locked}><div className="dialog-heading"><div><span className="section-kicker">{kicker}</span><h2>{title}</h2></div>{close && <button type="button" className="icon-button" aria-label={`关闭${title}`} onClick={requestClose} disabled={locked}><X size={20} /></button>}</div>{children}</div>
   </dialog>;
 }

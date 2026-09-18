@@ -17,17 +17,17 @@ let app: Awaited<ReturnType<typeof createApp>>;
 let built: Awaited<ReturnType<typeof createApp>>[] = [];
 // The mod service must never reach the network from a test, and its watchers must not outlive one.
 const offline: Modrinth = { versionsByHash: async () => new Map(), projects: async () => new Map(), project: async () => null };
-async function build(options: Parameters<typeof createApp>[0]) {
-  const created = await createApp({ modrinth: offline, watchFiles: false, pollInterval: 3_600_000, settleDelay: 0, ...options });
+async function build(options: Omit<Parameters<typeof createApp>[0], 'adminPassword'> & { adminPassword?: string }) {
+  const created = await createApp({ modrinth: offline, watchFiles: false, pollInterval: 3_600_000, settleDelay: 0, adminPassword: password, ...options });
   built.push(created);
   return created;
 }
 function write(agent: ReturnType<typeof request> | ReturnType<typeof request.agent>, path: string, body: unknown, method: 'post' | 'put' = 'post') {
   return agent[method](path).set('Host', 'panel.test').set('Origin', 'http://panel.test').send(body);
 }
-async function register() {
+async function login() {
   const agent = request.agent(app);
-  await write(agent, '/api/auth/register', { password }).expect(201);
+  await write(agent, '/api/auth/login', { password }).expect(200);
   return agent;
 }
 beforeEach(async () => {
@@ -43,45 +43,57 @@ afterEach(async () => {
 });
 
 describe('administrator authentication', () => {
-  it('registers once with a hashed password and a private session cookie', async () => {
-    expect((await request(app).get('/api/auth/status')).body).toEqual({ registered: false, authenticated: false, configured: false });
-    await write(request(app), '/api/auth/register', { password: 'short' }).expect(400);
-    const response = await write(request(app), '/api/auth/register', { password }).expect(201);
+  it('signs in with the configured password and a private session cookie', async () => {
+    expect((await request(app).get('/api/auth/status')).body).toEqual({ authenticated: false, configured: false });
+    await write(request(app), '/api/auth/login', { password: 'incorrect' }).expect(401);
+    const response = await write(request(app), '/api/auth/login', { password }).expect(200);
     const cookie = response.headers['set-cookie'][0];
     expect(cookie).toContain('HttpOnly'); expect(cookie).toContain('SameSite=Strict');
-    expect(response.body.authenticated).toBe(true);
-    const stored = await readFile(join(directory, 'data', 'panel.json'), 'utf8');
-    expect(stored).not.toContain(password); expect(JSON.parse(stored).admin.hash).toHaveLength(128);
-    await write(request(app), '/api/auth/register', { password }).expect(409);
+    expect(response.body).toEqual({ authenticated: true, configured: false });
+    expect((await request(app).get('/api/auth/status').set('Cookie', response.headers['set-cookie'])).body.authenticated).toBe(true);
     await request(app).get('/api/admin/config').expect(401);
-    await write(request(app), '/api/auth/login', { password: 'incorrect' }).expect(401);
   });
-  it('serializes simultaneous first registrations', async () => {
-    const responses = await Promise.all([write(request(app), '/api/auth/register', { password }), write(request(app), '/api/auth/register', { password: 'another-password' })]);
-    expect(responses.map(r => r.status).sort()).toEqual([201, 409]);
+  it('offers neither registration nor password changes and never stores the password', async () => {
+    const agent = await login();
+    await write(request(app), '/api/auth/register', { password: 'another-password' }).expect(404);
+    await write(agent, '/api/auth/password', { currentPassword: password, newPassword: 'replacement-password' }, 'put').expect(404);
+    await write(request(app), '/api/auth/login', { password: 'another-password' }).expect(401);
+    await write(agent, '/api/admin/display', { showServerMods: false, showClientMods: true }, 'put').expect(200);
+    const stored = await readFile(join(directory, 'data', 'panel.json'), 'utf8');
+    expect(stored).not.toContain(password); expect(JSON.parse(stored)).not.toHaveProperty('admin');
+  });
+  it('refuses to start with an invalid administrator password', async () => {
+    await expect(build({ dataDirectory: join(directory, 'weak'), adminPassword: 'short' })).rejects.toThrow('8–256');
   });
   it('rejects cross-origin and missing-origin writes', async () => {
-    await request(app).post('/api/auth/register').set('Origin', 'https://other.test').send({ password }).expect(403);
-    await request(app).post('/api/auth/register').send({ password }).expect(403);
+    await request(app).post('/api/auth/login').set('Origin', 'https://other.test').send({ password }).expect(403);
+    await request(app).post('/api/auth/login').send({ password }).expect(403);
   });
-  it('invalidates sessions on logout, password changes and process restart', async () => {
-    const first = await register();
-    const second = request.agent(app);
-    await write(second, '/api/auth/login', { password }).expect(200);
-    await write(first, '/api/auth/password', { currentPassword: 'incorrect', newPassword: 'replacement-password' }, 'put').expect(400);
-    await write(first, '/api/auth/password', { currentPassword: password, newPassword: 'replacement-password' }, 'put').expect(200);
-    await first.get('/api/admin/config').expect(401); await second.get('/api/admin/config').expect(401);
-    await write(first, '/api/auth/login', { password }).expect(401);
-    const login = await write(first, '/api/auth/login', { password: 'replacement-password' }).expect(200);
-    const restarted = await build({ dataDirectory: join(directory, 'data'), versions: sources });
-    await request(restarted).get('/api/admin/config').set('Cookie', login.headers['set-cookie']).expect(401);
-    expect((await request(restarted).get('/api/auth/status')).body.registered).toBe(true);
-    await write(first, '/api/auth/logout', {}).expect(200); await first.get('/api/admin/config').expect(401);
+  it('invalidates sessions on logout and on restart, where a changed password takes effect', async () => {
+    const first = await login();
+    const second = await login();
+    await write(first, '/api/auth/logout', {}).expect(200);
+    await first.get('/api/admin/config').expect(401); await second.get('/api/admin/config').expect(200);
+    const signedIn = await write(request(app), '/api/auth/login', { password }).expect(200);
+    const restarted = await build({ dataDirectory: join(directory, 'data'), versions: sources, adminPassword: 'replacement-password' });
+    await request(restarted).get('/api/admin/config').set('Cookie', signedIn.headers['set-cookie']).expect(401);
+    await write(request(restarted), '/api/auth/login', { password }).expect(401);
+    await write(request(restarted), '/api/auth/login', { password: 'replacement-password' }).expect(200);
+  });
+  it('drops an administrator hash left by older versions on the next write', async () => {
+    const dataDirectory = join(directory, 'legacy');
+    await mkdir(dataDirectory);
+    await writeFile(join(dataDirectory, 'panel.json'), JSON.stringify({ version: 1, admin: await hashPassword('old-registered-password'), config: null }));
+    app = await build({ dataDirectory, versions: sources });
+    await write(request(app), '/api/auth/login', { password: 'old-registered-password' }).expect(401);
+    const agent = await login();
+    await write(agent, '/api/admin/display', { showServerMods: true, showClientMods: false }, 'put').expect(200);
+    expect(JSON.parse(await readFile(join(dataDirectory, 'panel.json'), 'utf8'))).toEqual({ version: 1, config: null, display: { showServerMods: true, showClientMods: false } });
   });
   it('expires sessions at 24 hours and rate limits repeated login attempts', async () => {
     let time = 0;
     app = await build({ dataDirectory: join(directory, 'clock'), versions: sources, now: () => time });
-    const agent = await register();
+    const agent = await login();
     time = 24 * 60 * 60 * 1000 + 1;
     await agent.get('/api/admin/config').expect(401);
     for (let i = 0; i < 10; i++) await write(request(app), '/api/auth/login', { password: 'wrong' }).expect(401);
@@ -89,16 +101,30 @@ describe('administrator authentication', () => {
     expect(limited.headers['retry-after']).toBeDefined();
   });
   it('counts only failed attempts and clears them after a successful login', async () => {
-    await register();
     for (let i = 0; i < 20; i++) await write(request(app), '/api/auth/login', { password }).expect(200);
     for (let i = 0; i < 9; i++) await write(request(app), '/api/auth/login', { password: 'wrong' }).expect(401);
     await write(request(app), '/api/auth/login', { password }).expect(200);
     for (let i = 0; i < 10; i++) await write(request(app), '/api/auth/login', { password: 'wrong' }).expect(401);
     await write(request(app), '/api/auth/login', { password }).expect(429);
   });
+  it('rate limits each client separately behind a trusted reverse proxy', async () => {
+    const proxied = await build({ dataDirectory: join(directory, 'proxied'), publicOrigin: 'http://panel.test' });
+    const attempt = (client: string, value: string) => write(request(proxied), '/api/auth/login', { password: value }).set('X-Forwarded-For', client);
+    for (let i = 0; i < 10; i++) await attempt('203.0.113.1', 'wrong').expect(401);
+    await attempt('203.0.113.1', password).expect(429);
+    await attempt('203.0.113.2', password).expect(200);
+  });
+  it.each([
+    ['without a public origin', {}],
+    ['from a peer outside the trusted proxies', { publicOrigin: 'http://panel.test', trustProxy: '10.0.0.0/8' }],
+  ])('ignores forwarded addresses %s', async (_name, extra) => {
+    const direct = await build({ dataDirectory: join(directory, 'direct'), ...extra });
+    for (let i = 0; i < 10; i++) await write(request(direct), '/api/auth/login', { password: 'wrong' }).set('X-Forwarded-For', `203.0.113.${i}`).expect(401);
+    await write(request(direct), '/api/auth/login', { password }).set('X-Forwarded-For', '203.0.113.99').expect(429);
+  });
   it('sets Secure cookies when the public origin is HTTPS', async () => {
     const secure = await build({ dataDirectory: join(directory, 'secure'), publicOrigin: 'https://panel.test' });
-    const response = await request(secure).post('/api/auth/register').set('Origin', 'https://panel.test').send({ password }).expect(201);
+    const response = await request(secure).post('/api/auth/login').set('Origin', 'https://panel.test').send({ password }).expect(200);
     expect(response.headers['set-cookie'][0]).toContain('Secure');
   });
 });
@@ -132,7 +158,7 @@ describe('configuration and directory access', () => {
       if (value === older) { startedOlder(); await new Promise<void>(resolve => { finishOlder = resolve; }); }
       return { path: String(value), entries: [], writable: true };
     } });
-    const agent = await register();
+    const agent = await login();
     const slow = write(agent, '/api/admin/directory/check', { path: older }).then(result => result);
     await started;
     await write(agent, '/api/admin/directory/check', { path: latest }).expect(200);
@@ -140,7 +166,7 @@ describe('configuration and directory access', () => {
     await write(agent, '/api/admin/config', { ...config, modsDirectory: latest }, 'put').expect(200);
   });
   it('lists files without recursion, confirms before saving, and persists only a complete configuration', async () => {
-    const agent = await register();
+    const agent = await login();
     const modsDirectory = join(directory, '中文 模组');
     await mkdir(join(modsDirectory, 'nested'), { recursive: true });
     await writeFile(join(modsDirectory, 'example.jar'), 'private contents');
@@ -161,7 +187,7 @@ describe('configuration and directory access', () => {
     expect((await reconnected.get('/api/admin/versions/minecraft')).body.versions).toHaveLength(1);
   });
   it('handles empty, nonexistent, relative, file and inaccessible paths', async () => {
-    const agent = await register();
+    const agent = await login();
     const empty = join(directory, 'empty'); await mkdir(empty);
     expect((await write(agent, '/api/admin/directory/check', { path: empty }).expect(200)).body.entries).toEqual([]);
     await write(agent, '/api/admin/directory/check', { path: join(directory, 'missing') }).expect(400);
@@ -173,7 +199,7 @@ describe('configuration and directory access', () => {
     await write(deniedAgent, '/api/admin/directory/check', { path: empty }).expect(403);
   });
   it('rechecks at save time and leaves setup incomplete when a checked directory disappears', async () => {
-    const agent = await register();
+    const agent = await login();
     const target = join(directory, 'removed'); await mkdir(target);
     await write(agent, '/api/admin/directory/check', { path: target }).expect(200);
     await rmdir(target);
@@ -201,7 +227,7 @@ describe('mod list, switches and downloads', () => {
       project: async () => null,
     };
     app = await build({ dataDirectory: join(directory, 'data'), versions: sources, modrinth });
-    const agent = await register();
+    const agent = await login();
     await write(agent, '/api/admin/directory/check', { path: modsDirectory }).expect(200);
     await write(agent, '/api/admin/config', { ...config, modsDirectory }, 'put').expect(200);
     return { agent, modsDirectory };
