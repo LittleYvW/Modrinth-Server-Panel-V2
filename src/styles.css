@@ -236,7 +236,8 @@ main {
   width:max(100%,1250px);
   height:auto;
   transform:translateX(-50%);
-  min-height:940px
+  min-height:940px;
+  overflow:visible
 }
 .artwork:after {
   content:"";

@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useCircuitRelay } from './useCircuitRelay';
 
 export function Cube({
@@ -13,20 +14,71 @@ export function GrassBlock() {
 export function FabricIcon() {
   return <svg className="fabric-icon" viewBox="0 0 58 60" aria-hidden="true"><path d="m28 3 7 6-3 5 18 15 5 1-5 8-7-2-18 21-6-6-7 1-8-9 5-6 19-20-4-5Z" fill="#9b8a70" /><path d="m28 10 7 5-3 4 15 12-8 7-15 16-13-12 18-20-4-5Z" fill="#e6d7b7" /><path d="m14 39 11-12m-9 17 14-14m-8 17 13-14" stroke="#f4e7cb" strokeWidth="2" /><path d="m27 11 7 6m-5 6 15 12" stroke="#655f50" strokeWidth="2" strokeDasharray="3 3" /></svg>;
 }
+const SCENE_HEIGHT = 940;
+const SEGMENT_HEIGHT = 640;
+const SEGMENT_GAP = 24;
+// Each tail returns to its starting x; the next segment resumes after a short gap.
+const circuitTail = (bend: number) => `v96l${bend} 64v152l${-bend} 64v${SEGMENT_HEIGHT - SEGMENT_GAP - 376}`;
 const circuitRoutes = [
   'M134 0v122h41v83L35 345H0',
   'M1546 0v122h-47v83l91 94h82',
   'M0 445h159v255l51 52h276',
-  'M1672 445h-158v85l-145 133v142h-77v135',
-  'M0 568l122 126v56l92 81v109',
-  'M1672 700h-174l-67 65v175',
+  `M1672 445h-158v85l-145 133v142h-77v135${circuitTail(-70)}`,
+  `M0 568l122 126v56l92 81v109${circuitTail(70)}`,
+  `M1672 700h-174l-67 65v175${circuitTail(70)}`,
   'M36 698v211h130',
   'M1292 849h171v-70l80-80',
 ];
 
+const extensionRoutes = [
+  { side: 'left', path: `M214 0${circuitTail(70)}` },
+  { side: 'right', path: `M1292 0${circuitTail(-70)}` },
+  { side: 'right', path: `M1431 0${circuitTail(70)}` },
+];
+
+function CircuitExtension({ index, enabled }: { index: number; enabled: boolean }) {
+  const ref = useCircuitRelay(enabled && index > 0);
+  return <g className="artwork-decoration circuit-extension" transform={`translate(0 ${SCENE_HEIGHT + index * SEGMENT_HEIGHT})`}>
+    {index > 0 && <g ref={ref} fill="none" stroke="#1a332b" strokeWidth="1">
+      {extensionRoutes.map(({ side, path }) => <g key={path}>
+        <path d={path} />
+        <g className="electric-route" data-side={side}>
+          <path className="electric-glow" d={path} />
+          <path className="electric-core" d={path} />
+        </g>
+      </g>)}
+    </g>}
+    <g className="floating-pixels" fill="#74988a" opacity=".10">
+      {[268, 1178, 324, 1450].map((x, i) => <rect key={x} x={x} y={80 + i * 144} width={18 + i * 2} height={18 + i * 2} style={{ animationDelay: `${-index * 1.7 - i * 2}s` }} />)}
+    </g>
+  </g>;
+}
+
 export default function Artwork({ simple = false }: { simple?: boolean }) {
   const circuitsRef = useCircuitRelay(!simple);
-  return <div className={`artwork${simple ? ' artwork-simple' : ''}`} aria-hidden="true"><svg className="scene" viewBox="0 0 1672 940" preserveAspectRatio="xMidYMin slice"><defs>
+  const artworkRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<SVGSVGElement>(null);
+  const [segments, setSegments] = useState(0);
+  useLayoutEffect(() => {
+    const artwork = artworkRef.current;
+    const scene = sceneRef.current;
+    if (!artwork || !scene) return;
+    const resize = () => {
+      const bounds = scene.getBoundingClientRect();
+      // Match xMidYMin slice, including the minimum scene height on narrow screens.
+      const scale = Math.max(bounds.width / 1672, bounds.height / SCENE_HEIGHT);
+      if (!scale) return;
+      const height = (artwork.getBoundingClientRect().bottom - bounds.top) / scale;
+      setSegments(Math.max(0, Math.ceil((height - SCENE_HEIGHT) / SEGMENT_HEIGHT)));
+    };
+    resize();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(resize);
+    observer.observe(artwork);
+    observer.observe(scene);
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={artworkRef} className={`artwork${simple ? ' artwork-simple' : ''}`} aria-hidden="true"><svg ref={sceneRef} className="scene" viewBox="0 0 1672 940" preserveAspectRatio="xMidYMin slice"><defs>
     <radialGradient id="halo"><stop stopColor="#16c66a" stopOpacity=".07" /><stop offset=".77" stopColor="#16c66a" stopOpacity=".015" /><stop offset="1" stopColor="#16c66a" stopOpacity="0" /></radialGradient>
     <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#1a7142" /><stop offset=".48" stopColor="#123d29" /><stop offset="1" stopColor="#17693c" /></linearGradient>
     <linearGradient id="shaft"><stop stopColor="#196c3d" /><stop offset=".5" stopColor="#0b2019" /><stop offset="1" stopColor="#196c3d" /></linearGradient>
@@ -61,5 +113,6 @@ export default function Artwork({ simple = false }: { simple?: boolean }) {
           return <rect key={i} style={{ animationDelay: `${-i * 0.75}s`, animationDuration: `${12 + i % 7}s` }} x={x} y={y} width={18 + i % 12} height={18 + i % 12} />;
         })}</g>
   <g className="artwork-decoration"><g fill="#84938f" opacity=".3"><path d="M1582 103h13v14h-13zM1595 117h14v14h-14zM1582 131h13v14h-13zM61 767h11v11H61zM83 767h11v11H83zM72 778h11v12H72zM61 790h11v11H61zM83 790h11v11H83zM1586 793h13v13h-13zM1599 780h13v13h-13z" /></g></g>
+  {Array.from({ length: segments }, (_, index) => <CircuitExtension key={index} index={index} enabled={!simple} />)}
   </svg><div className="edge-copy top-left">BUILD<br />BETTER<br />TOGETHER</div><div className="edge-copy top-right">MODS<br />POWER<br />COMMUNITY</div><div className="edge-copy bottom-left">SAME<br />GAME<br />BIGGER<br />POSSIBILITIES</div><div className="edge-copy bottom-right">SERVERS<br />MODS<br />PEOPLE</div></div>;
 }
