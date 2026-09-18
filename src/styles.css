@@ -1177,4 +1177,15 @@ footer {
 }
 
 .download-card:disabled { cursor:not-allowed; opacity:.65; }
+/* Busy/done cards are disabled only to block re-clicks; they stay fully visible for the progress animation. */
+.download-card:disabled:not([data-phase="idle"]) { cursor:progress; opacity:1; }
+.download-card[data-phase="done"] { cursor:default; }
+.download-progress { position:absolute; left:14px; right:14px; bottom:12px; height:4px; border-radius:2px; background:#0b321c88; overflow:hidden; }
+.download-progress>span { position:absolute; inset:0; background:#2cef77; transform-origin:left; transform:scaleX(var(--progress, 0)); transition:transform .2s ease-out; }
+.download-card[data-phase="connecting"] .download-progress>span { width:35%; transform:none; animation:download-sweep 1.1s ease-in-out infinite; }
+@keyframes download-sweep { from { left:-35%; } to { left:100%; } }
+@media(prefers-reduced-motion:reduce) {
+  .download-progress>span { transition:none; }
+  .download-card[data-phase="connecting"] .download-progress>span { animation:none; width:100%; opacity:.4; }
+}
 .download-status { margin:8px 16px 0; max-width:540px; text-align:center; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }

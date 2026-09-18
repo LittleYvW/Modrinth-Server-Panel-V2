@@ -2,58 +2,136 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import DownloadCard from './DownloadCard';
+import DownloadCard, { fileNameOf } from './DownloadCard';
 import { PublicMods } from './Mods';
 import { api } from './api';
 
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(), api: vi.fn() }));
-let downloads: string[];
+
+type Stream = { push(bytes: number): void; end(): void };
+type Request = { url: string; signal: AbortSignal; fail(): void; respond(init?: { status?: number; headers?: Record<string, string>; url?: string }): Stream };
+let requests: Request[];
+let saves: { href: string; name: string }[];
+let blobs: number;
 beforeEach(() => {
   vi.useFakeTimers();
-  downloads = [];
+  requests = [];
+  saves = [];
+  blobs = 0;
   vi.mocked(api).mockReset();
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-    expect(this).toHaveAttribute('download', '');
     expect(this).toBeInTheDocument();
-    downloads.push(this.getAttribute('href')!);
+    saves.push({ href: this.getAttribute('href')!, name: this.download });
   });
+  Object.assign(URL, { createObjectURL: vi.fn(() => `blob:${++blobs}`), revokeObjectURL: vi.fn() });
+  vi.stubGlobal('fetch', vi.fn((url: string, { signal }: { signal: AbortSignal }) => new Promise<Response>((resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    requests.push({
+      url, signal,
+      fail: () => reject(new TypeError('Failed to fetch')),
+      respond({ status = 200, headers = {}, url: finalUrl } = {}) {
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const body = new ReadableStream<Uint8Array>({ start: c => { controller = c; } });
+        signal.addEventListener('abort', () => { try { controller.error(new DOMException('aborted', 'AbortError')); } catch { /* closed */ } });
+        const res = new Response(body, { status, headers });
+        if (finalUrl) Object.defineProperty(res, 'url', { value: finalUrl });
+        resolve(res);
+        return { push: bytes => controller.enqueue(new Uint8Array(bytes)), end: () => controller.close() };
+      },
+    });
+  })));
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-const button = () => screen.getByRole('button', { name: /下载全部\s*需要多重下载权限/ });
-const card = (urls = ['/one', '/two', '/three'], active = true) => <DownloadCard urls={urls} loading={false} error="" active={active} />;
+
+const button = () => document.querySelector<HTMLButtonElement>('.download-card')!;
+const files = (...urls: string[]) => urls.map(url => ({ url, name: `${url.slice(1)}.jar` }));
+const card = (list = files('/one', '/two', '/three'), active = true) => <DownloadCard files={list} loading={false} error="" active={active} />;
 const advance = async (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+const jar = (name: string, size: number) => ({ headers: { 'Content-Length': String(size), 'Content-Disposition': `attachment; filename="x.jar"; filename*=UTF-8''${encodeURIComponent(name)}` } });
 
 describe('batch downloads', () => {
-  it('snapshots the queue, spaces requests, prevents duplicate clicks and cleans up links', async () => {
-    const view = render(card());
+  it('reports connecting, byte progress and completion, then saves blobs with server file names', async () => {
+    render(card(files('/one')));
+    expect(button()).toHaveAttribute('data-phase', 'idle');
     fireEvent.click(button());
-    fireEvent.click(button());
-    expect(downloads).toEqual(['/one']);
+    expect(button()).toHaveAttribute('data-phase', 'connecting');
+    expect(button()).toHaveTextContent('正在连接');
     expect(button()).toBeDisabled();
-    view.rerender(card(['/replacement']));
-    await advance(299);
-    expect(downloads).toHaveLength(1);
-    await advance(1);
-    expect(downloads).toEqual(['/one', '/two']);
+
+    const stream = requests[0].respond(jar('钠 sodium.jar', 100));
+    await advance(0);
+    expect(button()).toHaveAttribute('data-phase', 'downloading');
+    stream.push(40);
+    await advance(20);
+    expect(button()).toHaveTextContent('40%');
+    expect(button().style.getPropertyValue('--progress')).toBe('0.4');
+    expect(saves).toEqual([]);
+
+    stream.push(60);
+    stream.end();
+    await advance(20);
+    expect(saves).toEqual([{ href: 'blob:1', name: '钠 sodium.jar' }]);
     await advance(300);
-    expect(downloads).toEqual(['/one', '/two', '/three']);
+    expect(button()).toHaveAttribute('data-phase', 'done');
     expect(button()).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent('已下载 1 个模组。');
     expect(document.querySelector('a[download]')).toBeNull();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    fireEvent.click(button());
-    expect(downloads.at(-1)).toBe('/replacement');
+    await advance(2500);
+    expect(button()).toHaveAttribute('data-phase', 'idle');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await advance(60_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:1');
   });
 
-  it.each(['inactive', 'unmount', 'pagehide'])('cancels pending downloads on %s', async reason => {
+  it('snapshots the queue, runs three requests at a time, spaces saves and ignores duplicate clicks', async () => {
+    const view = render(card(files('/a', '/b', '/c', '/d')));
+    fireEvent.click(button());
+    fireEvent.click(button());
+    view.rerender(card(files('/replacement')));
+    expect(requests.map(request => request.url)).toEqual(['/a', '/b', '/c']);
+    for (const request of requests.slice(0, 3)) request.respond().end();
+    await advance(0);
+    expect(requests.map(request => request.url)).toEqual(['/a', '/b', '/c', '/d']);
+    expect(saves).toHaveLength(1);
+    requests[3].respond().end();
+    await advance(299);
+    expect(saves).toHaveLength(1);
+    await advance(1);
+    expect(saves).toHaveLength(2);
+    await advance(600);
+    expect(saves.map(save => save.name)).toEqual(['a.jar', 'b.jar', 'c.jar', 'd.jar']);
+    expect(button()).toHaveAttribute('data-phase', 'done');
+    fireEvent.click(button());
+    expect(requests.at(-1)!.url).toBe('/replacement');
+  });
+
+  it('counts failed responses and hands requests that cannot be fetched to the browser', async () => {
+    render(card(files('/missing', '/mirror', '/ok')));
+    fireEvent.click(button());
+    requests[0].respond({ status: 404 });
+    requests[1].fail();
+    requests[2].respond({ url: 'https://cdn.modrinth.com/data/x/sodium-fabric-0.6%2Bmc1.21.jar' }).end();
+    await advance(1000);
+    expect(saves).toEqual([{ href: '/mirror', name: '' }, { href: 'blob:1', name: 'sodium-fabric-0.6+mc1.21.jar' }]);
+    expect(button()).toHaveTextContent('部分失败');
+    expect(screen.getByRole('status')).toHaveTextContent('1 个模组下载失败，其余 2 个已保存。');
+  });
+
+  it.each(['inactive', 'unmount', 'pagehide'])('aborts pending downloads on %s', async reason => {
     const view = render(card());
     fireEvent.click(button());
+    const stream = requests[0].respond();
+    stream.push(10);
     if (reason === 'inactive') view.rerender(card(undefined, false));
     else if (reason === 'unmount') view.unmount();
     else fireEvent(window, new Event('pagehide'));
     await advance(1000);
-    expect(downloads).toEqual(['/one']);
+    expect(requests.every(request => request.signal.aborted)).toBe(true);
+    expect(requests).toHaveLength(3);
+    expect(saves).toEqual([]);
     if (reason === 'inactive') {
       view.rerender(card());
+      expect(button()).toHaveAttribute('data-phase', 'idle');
       expect(button()).toBeEnabled();
     }
   });
@@ -62,13 +140,13 @@ describe('batch downloads', () => {
     { loading: true, error: '', urls: ['/one'], message: '正在读取模组列表…' },
     { loading: false, error: '网络错误', urls: ['/one'], message: '模组列表加载失败：网络错误' },
     { loading: false, error: '', urls: [], message: '暂无可下载的双端模组。' },
-  ])('disables unavailable downloads: $message', ({ message, ...props }) => {
-    render(<DownloadCard {...props} active />);
+  ])('disables unavailable downloads: $message', ({ message, urls, ...props }) => {
+    render(<DownloadCard files={files(...urls)} {...props} active />);
     expect(button()).toBeDisabled();
     expect(button()).toHaveAccessibleDescription(message);
     expect(screen.getByText('需要多重下载权限')).toBeInTheDocument();
     fireEvent.click(button());
-    expect(downloads).toEqual([]);
+    expect(requests).toEqual([]);
   });
 
   it('shares the live list and downloads only both-side entries, using encoded IDs', async () => {
@@ -86,10 +164,27 @@ describe('batch downloads', () => {
     fireEvent.click(button());
     await act(async () => { update!(); });
     expect(screen.queryByText('Mod 0')).not.toBeInTheDocument();
-    await advance(300);
-    expect(downloads).toEqual(['/api/public/mods/mod%200/download', '/api/public/mods/mod%203/download']);
+    expect(requests.map(request => request.url)).toEqual(['/api/public/mods/mod%200/download', '/api/public/mods/mod%203/download']);
+    for (const request of requests) request.respond().end();
+    await advance(1000);
+    expect(saves.map(save => save.name)).toEqual(['Mod 0.jar', 'Mod 3.jar']);
     fireEvent.click(button());
-    expect(downloads.at(-1)).toBe('/api/public/mods/mod%203/download');
+    expect(requests.at(-1)!.url).toBe('/api/public/mods/mod%203/download');
     expect(vi.mocked(api)).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('fileNameOf', () => {
+  const response = (headers: Record<string, string>, url = '') => {
+    const res = new Response(null, { headers });
+    if (url) Object.defineProperty(res, 'url', { value: url });
+    return res;
+  };
+  it('prefers the encoded header, then the plain one, then a .jar URL segment', () => {
+    expect(fileNameOf(response({ 'Content-Disposition': `attachment; filename="a.jar"; filename*=UTF-8''%E9%92%A0.jar` }), 'f.jar')).toBe('钠.jar');
+    expect(fileNameOf(response({ 'Content-Disposition': 'attachment; filename="a.jar"' }), 'f.jar')).toBe('a.jar');
+    expect(fileNameOf(response({}, 'https://cdn.test/x/b%2B1.jar'), 'f.jar')).toBe('b+1.jar');
+    expect(fileNameOf(response({}, 'http://panel.test/api/public/mods/x/download'), 'f.jar')).toBe('f.jar');
+    expect(fileNameOf(response({ 'Content-Disposition': `attachment; filename*=UTF-8''%E0.jar` }), 'f.jar')).toBe('f.jar');
   });
 });

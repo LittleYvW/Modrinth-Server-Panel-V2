@@ -32,7 +32,7 @@ function Panel({ side, count, children }: { side: ModSide; count: number; childr
 export function PublicMods({ active = true }: { active?: boolean }) {
   const { data, error, loading } = useModList<PublicModList>('/public/mods', true);
   const mods = data?.mods ?? [];
-  return <><DownloadCard urls={mods.filter(mod => mod.side === 'both').map(mod => downloadPath(mod.id))} loading={!data && !error || loading} error={error} active={active} /><div className="mod-sections">{groups.map(side => {
+  return <><DownloadCard files={mods.filter(mod => mod.side === 'both').map(mod => ({ url: downloadPath(mod.id), name: `${mod.name}.jar` }))}loading={!data && !error || loading} error={error} active={active} /><div className="mod-sections">{groups.map(side => {
     const group = mods.filter(mod => mod.side === side);
     return <Panel key={side} side={side} count={group.length}>
       {group.length ? <ul className="mod-list">{group.map(mod => <li className="mod-row" key={mod.id}>
