@@ -16,6 +16,8 @@ export type AuthStatus = { registered: boolean; authenticated: boolean; configur
 export type DirectoryListing = {
   path: string;
   entries: { name: string; type: 'file' | 'directory' | 'link' | 'other' }[];
+  // Readable but not writable still lists mods, but switches and category moves will fail.
+  writable: boolean;
 };
 export type VersionOption = { id: string; type?: string };
 export type VersionList = { versions: VersionOption[]; stale?: boolean };
@@ -51,5 +53,7 @@ export type AdminMod = PublicMod & {
 export type DisplaySettings = { showServerMods: boolean; showClientMods: boolean };
 export const defaultDisplay: DisplaySettings = { showServerMods: true, showClientMods: true };
 export type PublicModList = { revision: number; mods: PublicMod[]; sides: ModSide[] };
-export type AdminModList = { revision: number; mods: AdminMod[]; scanning: boolean; configured: boolean };
+// `issues` are directory-wide problems (unreadable or read-only directory, state that cannot be saved);
+// per-file problems stay on each mod's `error`.
+export type AdminModList = { revision: number; mods: AdminMod[]; scanning: boolean; configured: boolean; issues: string[] };
 export type ModUpdate = { enabled?: boolean; side?: ModSide | null; projectId?: string | null; downloadUrl?: string | null };

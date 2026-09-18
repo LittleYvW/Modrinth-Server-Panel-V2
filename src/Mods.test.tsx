@@ -84,8 +84,30 @@ describe('public mod list', () => {
 
 describe('workspace mod management', () => {
   function load(mods: AdminMod[]) {
-    mocked.mockImplementation(async path => path === '/admin/mods' ? { revision: 1, mods, scanning: false, configured: true } : { revision: 1, mods });
+    mocked.mockImplementation(async path => path === '/admin/mods' ? { revision: 1, mods, scanning: false, configured: true, issues: [] } : { revision: 1, mods });
   }
+
+  it('shows directory-wide problems as they appear and raises one toast per new problem', async () => {
+    const handlers: { mods?: () => void } = {};
+    vi.stubGlobal('EventSource', listen(handlers));
+    let issues: string[] = [];
+    mocked.mockImplementation(async () => ({ revision: 1, mods: [adminMod()], scanning: false, configured: true, issues }));
+    const notify = vi.fn();
+    render(<AdminMods notify={notify} />);
+    await screen.findByRole('switch', { name: '启用 Sodium' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    issues = ['模组目录不可写：开关与分类调整无法生效。'];
+    act(() => handlers.mods?.());
+    expect(await screen.findByRole('alert')).toHaveTextContent('模组目录不可写');
+    expect(notify).toHaveBeenCalledWith('模组目录需要处理', issues[0], 'error');
+    act(() => handlers.mods?.());
+    await waitFor(() => expect(mocked).toHaveBeenCalledTimes(3));
+    expect(notify).toHaveBeenCalledTimes(1);
+    issues = [];
+    act(() => handlers.mods?.());
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    vi.unstubAllGlobals();
+  });
 
   it('switches a mod without touching its category, binding or configuration', async () => {
     load([adminMod()]);
@@ -144,7 +166,7 @@ describe('workspace mod management', () => {
     const resolve = await screen.findByRole('button', { name: '重新识别绑定 Sodium' });
     mocked.mockRejectedValueOnce(new Error('暂时无法连接 Modrinth。'));
     await user.click(resolve);
-    await waitFor(() => expect(notify).toHaveBeenCalledWith('操作未完成', '暂时无法连接 Modrinth。'));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('操作未完成', '暂时无法连接 Modrinth。', 'error'));
     expect(screen.getByRole('switch', { name: '启用 Sodium' })).toBeEnabled();
     expect(mocked.mock.calls.filter(([path]) => path === '/admin/mods')).toHaveLength(2);
   });

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { loaders, type DisplaySettings, type PanelConfig } from '../shared/types.js';
-import { HttpError } from './errors.js';
+import { dataWriteProblem, HttpError } from './errors.js';
 
 const deriveKey = promisify(scrypt);
 export type PasswordHash = { salt: string; hash: string };
@@ -56,8 +56,11 @@ export async function createStore(directory: string) {
           await writeFile(temporary, JSON.stringify(next, null, 2), { mode: 0o600, flag: 'wx' });
           await rename(temporary, filename);
           state = next;
+        } catch (error) {
+          console.error('Panel state could not be saved:', (error as NodeJS.ErrnoException).code ?? 'unknown error');
+          throw new HttpError(500, dataWriteProblem(error, '面板配置'));
         } finally {
-          await rm(temporary, { force: true });
+          await rm(temporary, { force: true }).catch(() => undefined);
         }
       });
       queue = operation.catch(() => undefined);

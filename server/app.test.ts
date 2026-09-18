@@ -130,7 +130,7 @@ describe('configuration and directory access', () => {
     const started = new Promise<void>(resolve => { startedOlder = resolve; });
     app = await build({ dataDirectory: join(directory, 'race'), listDirectory: async value => {
       if (value === older) { startedOlder(); await new Promise<void>(resolve => { finishOlder = resolve; }); }
-      return { path: String(value), entries: [] };
+      return { path: String(value), entries: [], writable: true };
     } });
     const agent = await register();
     const slow = write(agent, '/api/admin/directory/check', { path: older }).then(result => result);

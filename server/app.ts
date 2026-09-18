@@ -8,7 +8,7 @@ import { directoryPath, readDirectory } from './directory.js';
 import { createVersionService } from './versions.js';
 import { createModService } from './mods.js';
 import type { Modrinth } from './modrinth.js';
-import { HttpError } from './errors.js';
+import { errorCode, HttpError, isPermissionError } from './errors.js';
 
 type Options = {
   dataDirectory: string;
@@ -164,7 +164,13 @@ export async function createApp(options: Options) {
     if (result.redirect) { res.redirect(302, result.redirect); return; }
     res.set({ 'Content-Type': 'application/java-archive', 'Content-Length': String(result.size), 'Content-Disposition': attachment(result.fileName!) });
     const file = createReadStream(result.path!);
-    file.on('error', () => { res.destroy(); });
+    // An unreadable file fails on open, before any byte is sent, so the visitor still gets a readable answer.
+    file.on('error', error => {
+      console.error('Mod download failed:', errorCode(error) ?? 'unknown error');
+      if (res.headersSent) { res.destroy(); return; }
+      res.removeHeader('Content-Disposition');
+      res.status(500).json({ error: isPermissionError(error) ? '服务器没有读取该模组文件的权限，请联系管理员。' : '暂时无法读取该模组文件，请稍后重试。' });
+    });
     res.on('close', () => file.destroy());
     file.pipe(res);
   });

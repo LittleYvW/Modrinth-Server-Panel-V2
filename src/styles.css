@@ -40,6 +40,7 @@ button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
 .field-help { margin-top:12px; font-size:11px; line-height:1.8; color:var(--muted); }
 .form-error { color:#ff9e94; border:1px solid #e76b6044; background:#e76b600c; padding:10px 12px; border-radius:8px; font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
 .directory-field>.form-error { margin-top:12px; }
+.form-warning { color:#ffcf7a; border:1px solid #e0a53a44; background:#e0a53a0d; padding:10px 12px; border-radius:8px; font-size:12px; line-height:1.7; overflow-wrap:anywhere; margin-top:12px; }
 .directory-preview { border:1px solid var(--line); border-radius:10px; margin-top:16px; background:var(--row); overflow:hidden; }
 .preview-heading { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--line); font-size:11px; color:var(--muted); }
 .preview-heading span:first-child { display:flex; align-items:center; gap:7px; color:var(--green); }
@@ -87,6 +88,7 @@ button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
 .spin { animation:admin-spin 1s linear infinite; }
 @keyframes admin-spin { to { transform:rotate(360deg); } }
 [data-theme="light"] .form-error { color:#a32c23; }
+[data-theme="light"] .form-warning { color:#8a5a00; }
 @media(max-width:760px) {
   .admin-content { padding:30px 16px 40px; }
   .setup-panel { padding:24px 20px; }
@@ -686,6 +688,12 @@ footer {
   color:var(--green);
   flex-shrink:0
 }
+.toast-error {
+  border-color:#e76b6066
+}
+.toast-error>svg {
+  color:#ff9e94
+}
 .toast strong {
   font-size:13px
 }
@@ -1154,6 +1162,9 @@ footer {
 .binding-loose { color:var(--muted); }
 .mod-source { padding:1px 6px; border:1px solid var(--line); border-radius:5px; }
 .mod-problem { color:#ff9e94; overflow-wrap:anywhere; }
+.mods-issues { display:grid; gap:8px; margin-bottom:16px; }
+.mods-issues p { display:flex; align-items:flex-start; gap:8px; color:#ff9e94; border:1px solid #e76b6044; background:#e76b600c; padding:10px 12px; border-radius:8px; font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
+.mods-issues svg { flex-shrink:0; margin-top:3px; }
 .mod-controls { display:flex; align-items:center; gap:14px; flex-shrink:0; }
 .switch-field { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted); }
 .switch-field>span { width:38px; }
@@ -1163,7 +1174,7 @@ footer {
 .mod-actions .icon-button { width:36px; height:36px; }
 [data-theme="light"] .mod-switch { background:#b4c1b6; }
 [data-theme="light"] .mod-switch[aria-checked="true"] { background:#168b46; }
-[data-theme="light"] .mod-problem { color:#a32c23; }
+[data-theme="light"] .mod-problem, [data-theme="light"] .mods-issues p, [data-theme="light"] .toast-error>svg { color:#a32c23; }
 @media(max-width:1100px) {
   .admin-mods { padding:20px 16px 22px; }
 }

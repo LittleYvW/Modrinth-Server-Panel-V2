@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link2, Link2Off, LoaderCircle, RefreshCw, Settings2, TriangleAlert } from 'lucide-react';
 import { Cube } from './Artwork';
 import Modal from './Modal';
@@ -7,6 +7,7 @@ import ModDownload from './ModDownload';
 import { api, errorMessage } from './api';
 import { modSideNames, modSides, type AdminMod, type AdminModList, type ModSide, type ModUpdate, type PublicMod, type PublicModList } from '../shared/types';
 import { useModList } from './useMods';
+import type { Tone } from './App';
 
 const groups: ModSide[] = ['both', 'server', 'client'];
 const sourceNames: Record<AdminMod['categorySource'], string> = {
@@ -114,11 +115,19 @@ function AdminRow({ mod, busy, act, configure }: {
   </li>;
 }
 
-export function AdminMods({ notify }: { notify: (name: string, text: string) => void }) {
+export function AdminMods({ notify }: { notify: (name: string, text: string, tone?: Tone) => void }) {
   const { data, error, loading, refresh, replace } = useModList<AdminModList>('/admin/mods', true);
   const [working, setWorking] = useState<string[]>([]);
   const [configuring, setConfiguring] = useState<AdminMod | null>(null);
   const mods = data?.mods ?? [];
+  const issues = data?.issues ?? [];
+  // The banner stays at the top of a long list, so a problem that appears while scrolled away also raises a toast.
+  const seenIssues = useRef<string[]>([]);
+  useEffect(() => {
+    const fresh = issues.filter(issue => !seenIssues.current.includes(issue));
+    seenIssues.current = issues;
+    if (fresh.length) notify('模组目录需要处理', fresh[0], 'error');
+  }, [issues.join('\n')]);
   function apply(updated: AdminMod) {
     replace(current => current ? { ...current, mods: current.mods.map(mod => mod.id === updated.id ? updated : mod) } : current);
   }
@@ -127,12 +136,14 @@ export function AdminMods({ notify }: { notify: (name: string, text: string) => 
     setWorking(current => [...current, id]);
     run().then(apply)
       // The panel shows what the files actually are, so a failure refetches instead of guessing.
-      .catch(failure => { notify('操作未完成', errorMessage(failure)); refresh(); })
+      .catch(failure => { notify('操作未完成', errorMessage(failure), 'error'); refresh(); })
       .finally(() => setWorking(current => current.filter(value => value !== id)));
   }
   if (error && !data) return <div className="workspace-message"><p className="form-error" role="alert">{error}</p><button className="secondary-button" onClick={refresh}>重试</button></div>;
   if (!data) return <div className="workspace-message"><LoaderCircle className="spin" size={24} /><p>正在读取模组目录…</p></div>;
   return <div className="admin-mods">
+    {issues.length > 0 && <div className="mods-issues" role="alert">{issues.map(issue =>
+      <p key={issue}><TriangleAlert size={15} />{issue}</p>)}</div>}
     <div className="mods-toolbar">
       <p>{data.scanning ? '正在扫描模组目录…' : `共 ${mods.length} 个模组，其中 ${mods.filter(mod => mod.enabled).length} 个已开启。`}</p>
       <button type="button" className="text-button" onClick={refresh} disabled={loading}><RefreshCw size={13} />刷新列表</button>

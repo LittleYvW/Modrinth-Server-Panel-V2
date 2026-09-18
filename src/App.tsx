@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CheckCheck, LoaderCircle, LogOut, Moon, Settings, Sun, X } from 'lucide-react';
+import { CheckCheck, LoaderCircle, LogOut, Moon, Settings, Sun, TriangleAlert, X } from 'lucide-react';
 import Artwork, { Cube } from './Artwork';
 import EnvironmentIcon from './EnvironmentIcon';
 import { AdminMods, PublicMods } from './Mods';
@@ -8,6 +8,7 @@ import { api, errorMessage } from './api';
 import { loaderNames, type AuthStatus, type PanelConfig, type PublicConfig } from '../shared/types';
 
 type Theme = 'dark' | 'light';
+export type Tone = 'success' | 'error';
 function readTheme(): Theme {
   try { return localStorage.getItem('server-mods-theme') === 'light' ? 'light' : 'dark'; }
   catch { return 'dark'; }
@@ -46,13 +47,13 @@ export default function App() {
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<{ name: string; text: string; id: number } | null>(null);
+  const [toast, setToast] = useState<{ name: string; text: string; tone: Tone; id: number } | null>(null);
   const isAdminRoute = route === '#/admin';
   const admin = isAdminRoute && !!auth?.authenticated;
   const expanding = transition === 'expanding';
   const handoffActive = useRef(false);
   handoffActive.current = expanding;
-  const notify = (name: string, text: string) => setToast({ name, text, id: Date.now() });
+  const notify = (name: string, text: string, tone: Tone = 'success') => setToast({ name, text, tone, id: Date.now() });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem('server-mods-theme', theme); } catch { /* Storage is optional for theme. */ }
@@ -133,7 +134,7 @@ export default function App() {
   async function logout() {
     setBusy(true);
     try { await api('/auth/logout', { method: 'POST', body: '{}' }); signedOut(); }
-    catch (error) { notify('退出失败', errorMessage(error)); }
+    catch (error) { notify('退出失败', errorMessage(error), 'error'); }
     finally { setBusy(false); }
   }
   function manage() {
@@ -151,6 +152,6 @@ export default function App() {
     </main>
     {authOpen && <AuthDialog key={authAttempt} close={() => { setAuthOpen(false); if (isAdminRoute && !auth?.authenticated) window.location.hash = ''; }} authenticated={onAuthenticated} transition={expanding ? { target: adminContent, complete: finishAuthTransition } : undefined} />}
     {settings && config && <SettingsDialog config={config} close={() => setSettings(false)} saved={onSaved} theme={theme} toggleTheme={toggleTheme} passwordChanged={() => { signedOut(); setAuthOpen(true); notify('密码已更新', '请使用新密码重新登录。'); }} />}
-    <div className="toast-region" role="status" aria-live="polite">{toast && <div className="toast" key={toast.id}><CheckCheck size={22} /><div><strong>{toast.name}</strong><p>{toast.text}</p></div><button aria-label="关闭提示" onClick={() => setToast(null)}><X size={18} /></button></div>}</div>
+    <div className="toast-region" role="status" aria-live="polite">{toast && <div className={`toast toast-${toast.tone}`} key={toast.id}>{toast.tone === 'error' ? <TriangleAlert size={22} /> : <CheckCheck size={22} />}<div><strong>{toast.name}</strong><p>{toast.text}</p></div><button aria-label="关闭提示" onClick={() => setToast(null)}><X size={18} /></button></div>}</div>
   </>;
 }

@@ -54,13 +54,13 @@ describe('directory and version configuration', () => {
     const input = screen.getByLabelText('模组目录');
     await user.type(input, '/old'); await user.click(screen.getByRole('button', { name: '检查' }));
     await user.clear(input); await user.type(input, '/new');
-    await act(async () => finish({ path: '/old', entries: [{ name: 'old.jar', type: 'file' }] }));
+    await act(async () => finish({ path: '/old', entries: [{ name: 'old.jar', type: 'file' }], writable: true }));
     expect(input).toHaveValue('/new'); expect(screen.queryByText('old.jar')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '检查' })).toBeEnabled();
   });
   it('checks and confirms an empty directory, then saves manually entered versions while offline', async () => {
     mockedApi.mockImplementation(async (path, options) => {
-      if (path === '/admin/directory/check') return { path: '/mods', entries: [] };
+      if (path === '/admin/directory/check') return { path: '/mods', entries: [], writable: true };
       if (path === '/admin/config') return JSON.parse(options!.body as string);
       throw new Error('暂时无法获取在线版本，请重试或手动输入版本号。');
     });
@@ -76,7 +76,7 @@ describe('directory and version configuration', () => {
     expect(saved).toHaveBeenCalledWith({ ...config, loader: 'quilt', loaderVersion: null });
   });
   it('requires rechecking and confirming a changed settings directory before saving', async () => {
-    mockedApi.mockImplementation(async path => path === '/admin/directory/check' ? { path: '/new', entries: [] } : { versions: [] });
+    mockedApi.mockImplementation(async path => path === '/admin/directory/check' ? { path: '/new', entries: [], writable: true } : { versions: [] });
     const user = userEvent.setup(); render(<ConfigForm initial={config} saved={vi.fn()} />);
     await user.clear(screen.getByLabelText('模组目录')); await user.type(screen.getByLabelText('模组目录'), '/new');
     expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled();

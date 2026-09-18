@@ -7,7 +7,8 @@ import { pipeline } from 'node:stream/promises';
 import type { AdminMod, AdminModList, DisplaySettings, ModBinding, ModCategorySource, ModSide, ModUpdate, PublicMod, PublicModList } from '../shared/types.js';
 import { defaultDisplay, modSides } from '../shared/types.js';
 import { classify, createModrinth, ModrinthError, versionFileUrl, type Modrinth, type ModrinthProject } from './modrinth.js';
-import { HttpError } from './errors.js';
+import { dataWriteProblem, errorCode, HttpError, isPermissionError } from './errors.js';
+import { probeWritable } from './directory.js';
 
 export const CLIENT_DIRECTORY = 'client-only';
 const JAR = '.jar';
@@ -45,8 +46,8 @@ type Entry = {
   version: VersionInfo | null;
   downloadUrl: string | null;
   lookupError: string | null;
+  readError: string | null;
   moveError: string | null;
-  moveKey: string | null;
 };
 type Found = { location: Location; fileName: string; enabled: boolean; size: number; mtimeMs: number };
 type StoredState = { version: 1; directories: Record<string, Entry[]> };
@@ -69,8 +70,8 @@ function safeFileName(name: string) {
 }
 function message(error: unknown) {
   if (error instanceof HttpError || error instanceof ModrinthError) return error.message;
-  const code = (error as NodeJS.ErrnoException).code;
-  if (code === 'EACCES' || code === 'EPERM') return '没有修改该文件的权限。';
+  const code = errorCode(error);
+  if (isPermissionError(error)) return '没有修改该文件的权限，请检查运行用户对模组目录的写权限。';
   if (code === 'EEXIST') return '目标位置已存在同名文件。';
   if (code === 'ENOENT') return '文件已不存在。';
   if (code === 'EBUSY') return '文件正被占用，请稍后重试。';
@@ -105,13 +106,19 @@ async function moveFile(from: string, to: string) {
   }
 }
 
+// A missing mods directory is an error, not an empty list: treating an unmounted or unreadable directory as
+// empty would forget every administrator setting on the next save.
 async function scanLocation(directory: string, location: Location): Promise<Found[]> {
   const base = locationDirectory(directory, location);
+  const where = location === 'client-only' ? `${CLIENT_DIRECTORY} 子目录` : '模组目录';
   let listing;
   try { listing = await readdir(base, { withFileTypes: true }); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
+    const code = errorCode(error);
+    if (code === 'ENOENT' && location === 'client-only') return [];
+    if (isPermissionError(error)) throw new Error(`没有读取${where}的权限，列表暂停更新。请检查运行用户的访问权限。`);
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw new Error(`${where}不存在或不是目录，列表暂停更新。请检查路径或磁盘挂载。`);
+    throw new Error(`无法读取${where}，列表暂停更新。请检查路径和访问权限。`);
   }
   const found: Found[] = [];
   for (const file of listing) {
@@ -159,11 +166,14 @@ export async function createModService(options: {
   const poll = options.pollInterval ?? POLL;
   const listeners = new Set<(revision: number) => void>();
   let saved: StoredState = { version: 1, directories: {} };
+  // A state file that exists but cannot be read is never overwritten: that would silently drop every setting in it.
+  let locked: string | null = null;
   try {
     const parsed = JSON.parse(await readFile(stateFile, 'utf8')) as StoredState;
     if (parsed?.version === 1 && parsed.directories && typeof parsed.directories === 'object') saved = parsed;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error('Mod state file unreadable; starting from the directory contents.');
+    if (isPermissionError(error)) locked = '没有读取数据目录中 mods.json 的权限，模组设置暂不保存。请修复权限后重启服务。';
+    else if (errorCode(error) !== 'ENOENT') console.error('Mod state file unreadable; starting from the directory contents.');
   }
 
   let directory: string | null = null;
@@ -180,6 +190,17 @@ export async function createModService(options: {
   let backoffUntil = 0;
   let closed = false;
   let display: DisplaySettings = defaultDisplay;
+  // Directory-wide problems, shown above the admin list until they clear on their own.
+  const issues: { scan: string | null; write: string | null; save: string | null } = { scan: null, write: null, save: locked };
+  if (locked) console.error(`Mod panel problem (save): ${locked}`);
+
+  function report(kind: keyof typeof issues, text: string | null) {
+    if (issues[kind] === text) return false;
+    if (text) console.error(`Mod panel problem (${kind}): ${text}`);
+    else console.log(`Mod panel problem cleared (${kind}).`);
+    issues[kind] = text;
+    return true;
+  }
 
   function announce() {
     revision++;
@@ -189,13 +210,23 @@ export async function createModService(options: {
   }
   async function persist() {
     if (directory) saved.directories[directory] = entries.map(entry => ({ ...entry }));
+    if (locked) return false;
     const temporary = `${stateFile}.${randomBytes(8).toString('hex')}.tmp`;
     try {
       await writeFile(temporary, JSON.stringify(saved), { mode: 0o600, flag: 'wx' });
       await rename(temporary, stateFile);
-    } catch {
+      return report('save', null);
+    } catch (error) {
       await rm(temporary, { force: true }).catch(() => undefined);
+      return report('save', `${dataWriteProblem(error, '模组状态')}重启后手动设置可能丢失。`);
     }
+  }
+  // The files themselves are the truth for switches and categories, so only moves need write access.
+  async function checkWritable() {
+    const client = locationDirectory(directory!, 'client-only');
+    const writable = await probeWritable(directory!)
+      && (!await stat(client).then(info => info.isDirectory(), () => false) || await probeWritable(client));
+    return report('write', writable ? null : '模组目录不可写：开关与分类调整无法生效。请授予运行用户对模组目录（含 client-only）的写权限。');
   }
   function serialize<T>(work: () => Promise<T>): Promise<T> {
     const operation = queue.then(work);
@@ -229,8 +260,8 @@ export async function createModService(options: {
         version: raw.version && typeof raw.version.id === 'string' ? raw.version : null,
         downloadUrl: typeof raw.downloadUrl === 'string' ? raw.downloadUrl : null,
         lookupError: null,
+        readError: null,
         moveError: null,
-        moveKey: null,
       }];
     });
   }
@@ -243,7 +274,7 @@ export async function createModService(options: {
       manualSide: null, autoSide: file.location === 'client-only' ? 'client' : 'both',
       autoSource: file.location === 'client-only' ? 'location' : 'default',
       bound: false, autoBindDisabled: false, projectId: null, project: null, version: null, downloadUrl: null,
-      lookupError: null, moveError: null, moveKey: null,
+      lookupError: null, readError: null, moveError: null,
     };
   }
 
@@ -273,11 +304,18 @@ export async function createModService(options: {
     if (!before?.isFile() || (settle > 0 && Date.now() - before.mtimeMs < settle)) return false;
     let hash: string;
     try { hash = await hashFile(path); }
-    catch { return false; }
+    catch (error) {
+      // A lock is transient and retried quietly; a denied read will not fix itself, so the administrator hears about it.
+      const text = isPermissionError(error) ? '没有读取该文件的权限，无法识别。请检查运行用户的访问权限。' : null;
+      if (current !== generation || entry.readError === text) return false;
+      entry.readError = text;
+      return true;
+    }
     const after = await stat(path).catch(() => null);
     if (current !== generation) return false;
     if (!after?.isFile() || after.mtimeMs !== before.mtimeMs || after.size !== before.size) return false;
     entry.hash = hash;
+    entry.readError = null;
     entry.size = after.size;
     entry.mtimeMs = after.mtimeMs;
     entry.resolved = false;
@@ -289,24 +327,28 @@ export async function createModService(options: {
     const wanted = { location: locationForSide(effectiveSide(entry)), enabled: entry.desiredEnabled };
     if (wanted.location === entry.location && wanted.enabled === entry.enabled) {
       const settled = entry.pending || entry.moveError;
-      entry.pending = false; entry.moveError = null; entry.moveKey = null;
+      entry.pending = false; entry.moveError = null;
       return !!settled;
     }
-    const key = `${wanted.location}|${wanted.enabled}|${entry.size}|${entry.mtimeMs}`;
-    if (entry.moveError && entry.moveKey === key) return false;
     const from = modFilePath(directory!, entry.location, entry.fileName, entry.enabled);
     const to = modFilePath(directory!, wanted.location, entry.fileName, wanted.enabled);
+    // A failed move is retried on every cycle, so it completes by itself once permissions are fixed, the lock
+    // is released or the conflicting file is gone; repeating the same failure is not news for the clients.
+    let creating = wanted.location === 'client-only';
     try {
-      if (wanted.location === 'client-only') await mkdir(join(directory!, CLIENT_DIRECTORY), { recursive: true });
+      if (creating) await mkdir(join(directory!, CLIENT_DIRECTORY), { recursive: true });
+      creating = false;
       await moveFile(from, to);
       if (current !== generation) return false;
       entry.location = wanted.location;
       entry.enabled = wanted.enabled;
-      entry.pending = false; entry.moveError = null; entry.moveKey = null;
+      entry.pending = false; entry.moveError = null;
     } catch (error) {
       if (current !== generation) return false;
-      entry.moveError = message(error);
-      entry.moveKey = key;
+      const text = creating && isPermissionError(error)
+        ? `无法创建 ${CLIENT_DIRECTORY} 子目录：没有写入模组目录的权限。` : message(error);
+      if (entry.moveError === text) return false;
+      entry.moveError = text;
     }
     return true;
   }
@@ -365,7 +407,8 @@ export async function createModService(options: {
   }
 
   function scheduleSettle() {
-    if (settleTimer || closed || !entries.some(entry => !entry.hash)) return;
+    // Unreadable files wait for the regular interval instead of spinning on the short settle timer.
+    if (settleTimer || closed || !entries.some(entry => !entry.hash && !entry.readError)) return;
     settleTimer = setTimeout(() => { settleTimer = null; void cycle(); }, settle + 100);
     settleTimer.unref?.();
   }
@@ -378,7 +421,15 @@ export async function createModService(options: {
       let changed = !scanned;
       let found: Found[];
       try { found = [...await scanLocation(directory, 'root'), ...await scanLocation(directory, 'client-only')]; }
-      catch { return; }
+      catch (error) {
+        // Keep the last known list and every setting; only say why it stopped updating.
+        if (current === generation && report('scan', (error as Error).message)) announce();
+        return;
+      }
+      if (current !== generation) return;
+      if (report('scan', null)) changed = true;
+      // Probe once per directory, then only while it is known to be read-only so the warning clears promptly.
+      if ((!scanned || issues.write) && await checkWritable()) changed = true;
       if (current !== generation) return;
       const { pairs, removed, added } = matchFiles(entries, found);
       if (removed.length) { rememberOrphans(removed); changed = true; }
@@ -392,7 +443,7 @@ export async function createModService(options: {
         if (!entry.pending) entry.desiredEnabled = file.enabled;
         if (entry.size !== file.size || entry.mtimeMs !== file.mtimeMs) {
           entry.size = file.size; entry.mtimeMs = file.mtimeMs; entry.hash = null; entry.resolved = false;
-          entry.moveError = null; entry.moveKey = null;
+          entry.moveError = null;
           changed = true;
         }
       }
@@ -405,7 +456,8 @@ export async function createModService(options: {
       for (const entry of entries) if (await reconcile(entry, current)) changed = true;
       if (current !== generation) return;
       scanned = true;
-      if (changed) { await persist(); announce(); }
+      // A failed save is retried every cycle until the data directory accepts it again.
+      if (changed || issues.save) { if (await persist() || changed) announce(); }
       scheduleSettle();
     });
   }
@@ -459,8 +511,8 @@ export async function createModService(options: {
       binding: (entry.bound ? 'bound' : 'unbound') as ModBinding,
       projectId: entry.projectId,
       downloadUrl: entry.downloadUrl,
-      resolving: !entry.hash || (!entry.resolved && !entry.autoBindDisabled && !entry.lookupError),
-      error: entry.moveError ?? entry.lookupError,
+      resolving: !entry.readError && (!entry.hash || (!entry.resolved && !entry.autoBindDisabled && !entry.lookupError)),
+      error: entry.moveError ?? entry.readError ?? entry.lookupError,
     };
   }
   const publicSides = () => modSides.filter(side => side === 'both'
@@ -493,6 +545,7 @@ export async function createModService(options: {
       orphans = [];
       scanned = false;
       backoffUntil = 0;
+      issues.scan = null; issues.write = null;
       announce();
       if (!next || closed) return;
       startWatching();
@@ -511,7 +564,10 @@ export async function createModService(options: {
       return { revision, mods: ordered().filter(entry => entry.enabled && sides.includes(effectiveSide(entry))).map(toPublic), sides };
     },
     adminList(): AdminModList {
-      return { revision, mods: ordered().map(toAdmin), scanning: !!directory && !scanned, configured: !!directory };
+      return {
+        revision, mods: ordered().map(toAdmin), scanning: !!directory && !scanned && !issues.scan, configured: !!directory,
+        issues: [issues.scan, issues.write, issues.save].filter((text): text is string => !!text),
+      };
     },
     refresh: () => cycle(),
     update(id: unknown, patch: ModUpdate) {
@@ -544,7 +600,7 @@ export async function createModService(options: {
           if (typeof patch.enabled !== 'boolean') throw new HttpError(400, '开关状态无效。');
           entry.desiredEnabled = patch.enabled;
           entry.pending = patch.enabled !== entry.enabled;
-          entry.moveError = null; entry.moveKey = null;
+          entry.moveError = null;
         }
         // The intent is on disk before the file moves, so an interrupted operation resumes on the next scan.
         await persist();
@@ -579,7 +635,10 @@ export async function createModService(options: {
         entry.resolved = false;
         entry.lookupError = null;
         if (!entry.hash) await refreshHash(entry, current);
-        if (!entry.hash) throw new HttpError(409, '文件仍在写入，请稍后重试。');
+        if (!entry.hash) {
+          if (entry.readError) { announce(); throw new HttpError(409, entry.readError); }
+          throw new HttpError(409, '文件仍在写入，请稍后重试。');
+        }
         await identify(current, entry);
         await reconcile(entry, current);
         await persist();

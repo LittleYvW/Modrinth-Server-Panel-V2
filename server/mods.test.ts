@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
@@ -357,5 +357,64 @@ describe('interrupted operations', () => {
     await start();
     expect(await names()).toEqual(['a.jar.disabled']);
     expect(admin()[0]).toMatchObject({ id, enabled: false });
+  });
+});
+
+describe('permission and availability problems', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('keeps every entry and setting while the directory is unavailable, reports why, and recovers', async () => {
+    await writeFile(join(mods, 'a.jar'), 'a');
+    await start();
+    const id = admin()[0].id;
+    await service.update(id, { side: 'server' });
+    expect(service.adminList().issues).toEqual([]);
+    const revisions: number[] = [];
+    service.subscribe(value => revisions.push(value));
+    await rename(mods, `${mods}-away`);
+    await service.refresh();
+    expect(service.adminList().issues).toEqual([expect.stringContaining('模组目录不存在')]);
+    expect(service.adminList().scanning).toBe(false);
+    expect(admin(id)).toMatchObject({ fileName: 'a.jar', manualSide: 'server' });
+    expect(revisions).toHaveLength(1);
+    await service.refresh();
+    expect(revisions).toHaveLength(1);
+    await rename(`${mods}-away`, mods);
+    await service.refresh();
+    expect(service.adminList().issues).toEqual([]);
+    expect(admin(id)).toMatchObject({ fileName: 'a.jar', manualSide: 'server' });
+  });
+
+  it('retries a failed move on later cycles, so it completes once the obstacle is gone', async () => {
+    await mkdir(join(mods, CLIENT_DIRECTORY));
+    await writeFile(join(mods, 'a.jar'), 'root');
+    await writeFile(join(mods, CLIENT_DIRECTORY, 'a.jar'), 'client');
+    await start();
+    const id = admin().find(mod => mod.side === 'both')!.id;
+    await expect(service.update(id, { side: 'client' })).rejects.toMatchObject({ status: 409 });
+    const revisions: number[] = [];
+    service.subscribe(value => revisions.push(value));
+    await service.refresh();
+    expect(revisions).toEqual([]);
+    await rename(join(mods, CLIENT_DIRECTORY, 'a.jar'), join(mods, 'b.jar'));
+    await service.refresh();
+    expect(admin(id)).toMatchObject({ side: 'client', error: null });
+    expect(await readFile(join(mods, CLIENT_DIRECTORY, 'a.jar'), 'utf8')).toBe('root');
+  });
+
+  it('reports state that cannot be saved and clears the warning once saving works again', async () => {
+    const data = join(directory, 'data');
+    await mkdir(join(data, 'mods.json'));
+    await writeFile(join(mods, 'a.jar'), 'a');
+    await start();
+    expect(service.adminList().issues).toEqual([expect.stringContaining('无法保存模组状态')]);
+    await rm(join(data, 'mods.json'), { recursive: true });
+    await service.refresh();
+    expect(service.adminList().issues).toEqual([]);
+    expect(JSON.parse(await readFile(join(data, 'mods.json'), 'utf8')).directories[mods]).toHaveLength(1);
   });
 });
