@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, Check, File, Folder, KeyRound, LoaderCircle, Moon, RefreshCw, Sun } from 'lucide-react';
-import { loaders, loaderNames, type AuthStatus, type DirectoryListing, type PanelConfig, type VersionList } from '../shared/types';
+import { loaders, loaderNames, type AuthStatus, type DirectoryListing, type DisplaySettings, type PanelConfig, type VersionList } from '../shared/types';
 import { api, ApiError, errorMessage } from './api';
 import Modal from './Modal';
 import type { DialogTransition } from './useDialogTransition';
@@ -179,11 +179,40 @@ function PasswordForm({ changed }: { changed: () => void }) {
   </form>;
 }
 
+const displayOptions: { key: keyof DisplaySettings; title: string; description: string }[] = [
+  { key: 'showServerMods', title: '显示服务端模组', description: '关闭后前台隐藏服务端模组分类，且不再提供其下载' },
+  { key: 'showClientMods', title: '显示客户端模组', description: '关闭后前台隐藏客户端模组分类，且不再提供其下载' },
+];
+function DisplayForm() {
+  const [value, setValue] = useState<DisplaySettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const request = new AbortController();
+    api<DisplaySettings>('/admin/display', { signal: request.signal }).then(setValue)
+      .catch(failure => { if (!request.signal.aborted) setError(errorMessage(failure)); });
+    return () => request.abort();
+  }, []);
+  async function toggle(key: keyof DisplaySettings) {
+    if (!value || busy) return;
+    setBusy(true); setError('');
+    try { setValue(await api<DisplaySettings>('/admin/display', { method: 'PUT', body: JSON.stringify({ ...value, [key]: !value[key] }) })); }
+    catch (failure) { setError(errorMessage(failure)); }
+    finally { setBusy(false); }
+  }
+  return <section className="display-settings" aria-label="前台显示">
+    {displayOptions.map(option => <div className="setting-row" key={option.key}><div><h3>{option.title}</h3><p>{option.description}</p></div>
+      <button type="button" className="mod-switch" role="switch" aria-checked={value?.[option.key] ?? false} aria-label={option.title} disabled={!value || busy} onClick={() => toggle(option.key)}><span /></button></div>)}
+    {error && <p className="form-error" role="alert">{error}</p>}
+  </section>;
+}
+
 export function SettingsDialog({ config, close, saved, theme, toggleTheme, passwordChanged }: {
   config: PanelConfig; close: () => void; saved: (value: PanelConfig) => void; theme: 'dark' | 'light'; toggleTheme: () => void; passwordChanged: () => void;
 }) {
   return <Modal title="后台设置" kicker="WORKSPACE SETTINGS" close={close} wide>
     <ConfigForm initial={config} saved={saved} />
+    <DisplayForm />
     <div className="setting-row"><div><h3>界面主题</h3><p>保存在当前浏览器中</p></div><button className="theme-choice" onClick={toggleTheme}>{theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}{theme === 'dark' ? '深色' : '浅色'}</button></div>
     <PasswordForm changed={passwordChanged} />
     <button className="text-button cancel-settings" onClick={close}>取消并关闭</button>

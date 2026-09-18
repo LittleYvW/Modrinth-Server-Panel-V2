@@ -2,7 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { resolve } from 'node:path';
-import { loaders, type Loader, type PanelConfig } from '../shared/types.js';
+import { defaultDisplay, loaders, type DisplaySettings, type Loader, type PanelConfig } from '../shared/types.js';
 import { createStore, hashPassword, validatePassword, verifyPassword } from './store.js';
 import { directoryPath, readDirectory } from './directory.js';
 import { createVersionService } from './versions.js';
@@ -168,9 +168,22 @@ export async function createApp(options: Options) {
     res.on('close', () => file.destroy());
     file.pipe(res);
   });
-  app.get('/api/public/config', (_req, res) => {
+  app.get('/api/public/config', async (_req, res) => {
     const config = store.read().config;
-    res.json(config ? { minecraftVersion: config.minecraftVersion, loader: config.loader, loaderVersion: config.loaderVersion } : null);
+    if (!config) { res.json(null); return; }
+    // Artwork metadata must not hold the public page hostage to an upstream outage.
+    // The existing version service shares pending requests and caches successful results.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let minecraftVersionType: 'release' | 'snapshot' | null = null;
+    try {
+      const type = await Promise.race([
+        versions.minecraft().then(list => list.versions.find(v => v.id === config.minecraftVersion)?.type),
+        new Promise<undefined>(resolve => { timeout = setTimeout(() => resolve(undefined), 1500); }),
+      ]);
+      if (type === 'release' || type === 'snapshot') minecraftVersionType = type;
+    } catch { /* Optional metadata: the client can infer common version names. */ }
+    finally { clearTimeout(timeout); }
+    res.json({ minecraftVersion: config.minecraftVersion, loader: config.loader, loaderVersion: config.loaderVersion, minecraftVersionType });
   });
   app.use('/api/admin', requireSession);
   app.post('/api/admin/directory/check', async (req, res) => {
@@ -198,6 +211,15 @@ export async function createApp(options: Options) {
     await mods.use(modsDirectory);
     res.json(config);
   });
+  app.get('/api/admin/display', (_req, res) => res.json(store.read().display ?? defaultDisplay));
+  app.put('/api/admin/display', async (req, res) => {
+    const { showServerMods, showClientMods } = req.body ?? {};
+    if (typeof showServerMods !== 'boolean' || typeof showClientMods !== 'boolean') throw new HttpError(400, '请提供有效的显示设置。');
+    const display: DisplaySettings = { showServerMods, showClientMods };
+    await store.update(state => { requireSession(req); return { ...state, display }; });
+    mods.setDisplay(store.read().display ?? display);
+    res.json(display);
+  });
   app.get('/api/admin/mods', (_req, res) => res.json(mods.adminList()));
   app.patch('/api/admin/mods/:id', async (req, res) => res.json(await mods.update(req.params.id, req.body ?? {})));
   app.post('/api/admin/mods/:id/unbind', async (req, res) => res.json(await mods.unbind(req.params.id)));
@@ -220,6 +242,7 @@ export async function createApp(options: Options) {
     console.error('Panel request failed:', error instanceof Error ? error.message : 'Unknown error');
     res.status(500).json({ error: '操作失败，请检查服务状态后重试。' });
   });
+  mods.setDisplay(store.read().display ?? defaultDisplay);
   await mods.use(store.read().config?.modsDirectory ?? null);
   app.locals.mods = mods;
   return app;

@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, rmdir, writeFile } from 'node:fs/promises
 import { join, resolve, sep } from 'node:path';
 import { createApp } from './app.js';
 import { HttpError } from './errors.js';
+import { hashPassword } from './store.js';
 import type { Modrinth } from './modrinth.js';
 
 const root = resolve('.test-data');
@@ -103,6 +104,25 @@ describe('administrator authentication', () => {
 });
 
 describe('configuration and directory access', () => {
+  it.each(['release', 'snapshot', 'unknown', 'offline', 'slow'] as const)('serves public configuration with optional %s metadata without persisting it', async scenario => {
+    const minecraft = async () => {
+      if (scenario === 'offline') throw new Error('Upstream unavailable');
+      if (scenario === 'slow') return new Promise<{ versions: [] }>(() => {});
+      return { versions: scenario === 'unknown' ? [] : [{ id: config.minecraftVersion, type: scenario }] };
+    };
+    expect((await request(app).get('/api/public/config').expect(200)).body).toBeNull();
+    const dataDirectory = join(directory, 'metadata');
+    const modsDirectory = join(directory, 'mods');
+    await mkdir(dataDirectory);
+    await mkdir(modsDirectory);
+    // Seed an existing installation: this read-only endpoint should never rewrite its configuration.
+    const stored = JSON.stringify({ version: 1, admin: await hashPassword(password), config: { ...config, modsDirectory } });
+    await writeFile(join(dataDirectory, 'panel.json'), stored);
+    app = await build({ dataDirectory, versions: { ...sources, minecraft } });
+    const response = await request(app).get('/api/public/config').expect(200);
+    expect(response.body).toEqual({ ...config, minecraftVersionType: scenario === 'release' || scenario === 'snapshot' ? scenario : null });
+    expect(await readFile(join(dataDirectory, 'panel.json'), 'utf8')).toBe(stored);
+  });
   it('does not invalidate the latest directory check when an older request finishes later', async () => {
     const older = join(directory, 'older'); const latest = join(directory, 'latest');
     let finishOlder!: () => void;
@@ -133,7 +153,7 @@ describe('configuration and directory access', () => {
     await write(agent, '/api/admin/config', { ...config, modsDirectory, minecraftVersion: '' }, 'put').expect(400);
     await write(agent, '/api/admin/config', { ...config, modsDirectory }, 'put').expect(200);
     expect((await agent.get('/api/auth/status')).body.configured).toBe(true);
-    expect((await request(app).get('/api/public/config')).body).toEqual(config);
+    expect((await request(app).get('/api/public/config')).body).toEqual({ ...config, minecraftVersionType: 'release' });
     const restarted = await build({ dataDirectory: join(directory, 'data'), versions: sources });
     const reconnected = request.agent(restarted);
     await write(reconnected, '/api/auth/login', { password }).expect(200);
@@ -232,6 +252,26 @@ describe('mod list, switches and downloads', () => {
     expect(manual).toMatchObject({ side: 'server', categorySource: 'manual', downloadUrl: 'https://mirror.test/sodium.jar' });
     const rebound = (await write(agent, `/api/admin/mods/${sodium.id}/resolve`, {})).body;
     expect(rebound).toMatchObject({ binding: 'bound', side: 'server', enabled: true });
+  });
+
+  it('hides server and client categories from the public page independently and remembers the choice', async () => {
+    const { agent } = await configured();
+    const sodium = (await agent.get('/api/admin/mods')).body.mods.find((mod: { name: string }) => mod.name === 'Sodium');
+    expect((await agent.get('/api/admin/display').expect(200)).body).toEqual({ showServerMods: true, showClientMods: true });
+    expect((await request(app).get('/api/public/mods')).body.sides).toEqual(['both', 'server', 'client']);
+    await write(agent, '/api/admin/display', { showServerMods: true }, 'put').expect(400);
+    await request(app).put('/api/admin/display').set('Host', 'panel.test').set('Origin', 'http://panel.test').send({ showServerMods: true, showClientMods: false }).expect(401);
+    await write(agent, '/api/admin/display', { showServerMods: true, showClientMods: false }, 'put').expect(200);
+    const hidden = (await request(app).get('/api/public/mods')).body;
+    expect(hidden.sides).toEqual(['both', 'server']);
+    expect(hidden.mods.map((mod: { name: string }) => mod.name)).toEqual(['plain']);
+    await request(app).get(`/api/public/mods/${sodium.id}/download`).expect(404);
+    expect((await agent.get('/api/admin/mods')).body.mods).toHaveLength(2);
+    const restarted = await build({ dataDirectory: join(directory, 'data'), versions: sources });
+    expect((await request(restarted).get('/api/public/mods')).body.sides).toEqual(['both', 'server']);
+    await write(agent, '/api/admin/display', { showServerMods: false, showClientMods: true }, 'put').expect(200);
+    expect((await request(app).get('/api/public/mods')).body.sides).toEqual(['both', 'client']);
+    await request(app).get(`/api/public/mods/${sodium.id}/download`).expect(302);
   });
 
   it('streams the list revision to every connected client', async () => {

@@ -50,6 +50,21 @@ async function submit() {
 }
 async function advance(ms = 800) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 
+it('refreshes public game and loader icons alongside their labels', async () => {
+  let current = { minecraftVersion: '1.20.1', minecraftVersionType: 'release', loader: 'fabric', loaderVersion: '0.15.11' };
+  const existing = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation(async (path, options) => path === '/public/config' ? current : existing(path, options));
+  await act(async () => { render(<App />); });
+  expect(document.querySelector('.environment-icon-minecraft img')).toHaveAttribute('src', '/icons/minecraft-release.png');
+  expect(document.querySelector('.environment-icon-loader img')).toHaveAttribute('src', '/icons/fabric.png');
+  current = { minecraftVersion: '26.1-snapshot-10', minecraftVersionType: 'snapshot', loader: 'neoforge', loaderVersion: '26.1.0.0-alpha.13+snapshot-10' };
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  expect(screen.getByText('Minecraft 26.1-snapshot-10')).toBeInTheDocument();
+  expect(screen.getByText('NeoForge 26.1.0.0-alpha.13+snapshot-10')).toBeInTheDocument();
+  expect(document.querySelector('.environment-icon-minecraft img')).toHaveAttribute('src', '/icons/minecraft-snapshot.png');
+  expect(document.querySelector('.environment-icon-loader img')).toHaveAttribute('src', '/icons/neoforge.png');
+});
+
 describe('authentication handoff', () => {
   it('keeps the header mounted and replaces management actions only after expansion', async () => {
     await openDialog();

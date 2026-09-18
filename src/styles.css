@@ -20,7 +20,6 @@
 input,select { font:inherit; color:inherit; min-width:0; }
 input:focus-visible,select:focus-visible { outline:2px solid var(--green); outline-offset:3px; }
 button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
-.loader-cube { width:48px; height:48px; color:var(--green); }
 .admin-content { position:relative; z-index:1; max-width:1160px; padding:64px 28px 80px; margin:auto; }
 .setup-panel { max-width:640px; margin:0 auto; padding:36px; background:var(--surface); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); backdrop-filter:blur(18px); }
 .workspace-intro h1 { font-size:30px; font-weight:600; letter-spacing:-.7px; margin:12px 0; }
@@ -303,7 +302,20 @@ main {
   line-height:1.24;
   text-shadow:0 3px 5px #0006
 }
-.grass-block {
+.environment-icon {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  color:var(--green)
+}
+.environment-icon img,.environment-icon svg {
+  display:block;
+  width:100%;
+  height:100%;
+  object-fit:contain
+}
+.environment-icon-minecraft {
   width:53px;
   height:59px;
   filter:drop-shadow(0 3px 3px #0003)
@@ -326,7 +338,7 @@ main {
   letter-spacing:-.5px;
   text-shadow:0 3px 5px #0005
 }
-.fabric-icon {
+.environment-icon-loader {
   width:54px;
   height:54px;
   filter:drop-shadow(0 2px 2px #0008)
@@ -527,6 +539,7 @@ main {
   box-shadow:0 2px 3px #0003
 }
 .mod-download {
+  position:relative;
   width:41px;
   height:39px
 }
@@ -835,7 +848,7 @@ main {
   font-size:35px;
   gap:12px
 }
-.grass-block {
+.environment-icon-minecraft {
   width:40px;
   height:46px
 }
@@ -848,7 +861,7 @@ main {
   font-size:28px;
   gap:12px
 }
-.fabric-icon {
+.environment-icon-loader {
   width:43px;
   height:44px
 }
@@ -1107,7 +1120,7 @@ footer {
 @media (min-width: 1450px) {
   .main-content { padding-top: 31px; padding-bottom: 6px; }
   .hero-divider { margin: 11px auto 8px; }
-  .fabric-icon { height: 50px; }
+  .environment-icon-loader { height: 50px; }
   .tagline { margin-top: 10px; }
   footer { margin-top: 12px; }
 }
@@ -1189,3 +1202,18 @@ footer {
   .download-card[data-phase="connecting"] .download-progress>span { animation:none; width:100%; opacity:.4; }
 }
 .download-status { margin:8px 16px 0; max-width:540px; text-align:center; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
+/* Single-mod download: the ring traces the button border while fetching. */
+.mod-download:not([data-phase="idle"]) { cursor:progress; }
+.mod-download[data-phase="done"] { color:var(--green); border-color:var(--green); cursor:pointer; }
+.mod-download[data-phase="failed"] { color:#ffb454; border-color:#ffb45480; cursor:pointer; }
+[data-theme="light"] .mod-download[data-phase="failed"] { color:#a85f00; border-color:#a85f0066; }
+.mod-download-ring { position:absolute; inset:-1px; width:calc(100% + 2px); height:calc(100% + 2px); overflow:visible; pointer-events:none; }
+.mod-download-ring rect { fill:none; stroke:var(--green); stroke-width:2; stroke-linecap:round;
+  stroke-dasharray:100; stroke-dashoffset:calc(100 - var(--progress, 0) * 100); transition:stroke-dashoffset .2s ease-out; }
+.mod-download[data-phase="connecting"] .mod-download-ring rect { stroke-dasharray:22 78; transition:none; animation:mod-download-trace 1.2s linear infinite; }
+@keyframes mod-download-trace { from { stroke-dashoffset:0; } to { stroke-dashoffset:-100; } }
+@media(prefers-reduced-motion:reduce) {
+  .mod-download .spin { animation-duration:3s; }
+  .mod-download-ring rect { transition:none; }
+  .mod-download[data-phase="connecting"] .mod-download-ring rect { animation:none; stroke-dasharray:none; opacity:.4; }
+}

@@ -9,7 +9,9 @@ export type PanelConfig = {
   loader: Loader;
   loaderVersion: string | null;
 };
-export type PublicConfig = Omit<PanelConfig, 'modsDirectory'>;
+export type PublicConfig = Omit<PanelConfig, 'modsDirectory'> & {
+  minecraftVersionType?: 'release' | 'snapshot' | null;
+};
 export type AuthStatus = { registered: boolean; authenticated: boolean; configured: boolean };
 export type DirectoryListing = {
   path: string;
@@ -45,6 +47,9 @@ export type AdminMod = PublicMod & {
   resolving: boolean;
   error: string | null;
 };
-export type PublicModList = { revision: number; mods: PublicMod[] };
+// Which categories the public page lists; `both` is always shown.
+export type DisplaySettings = { showServerMods: boolean; showClientMods: boolean };
+export const defaultDisplay: DisplaySettings = { showServerMods: true, showClientMods: true };
+export type PublicModList = { revision: number; mods: PublicMod[]; sides: ModSide[] };
 export type AdminModList = { revision: number; mods: AdminMod[]; scanning: boolean; configured: boolean };
 export type ModUpdate = { enabled?: boolean; side?: ModSide | null; projectId?: string | null; downloadUrl?: string | null };

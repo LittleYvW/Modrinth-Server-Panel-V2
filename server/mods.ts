@@ -4,8 +4,8 @@ import { lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'no
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { pipeline } from 'node:stream/promises';
-import type { AdminMod, AdminModList, ModBinding, ModCategorySource, ModSide, ModUpdate, PublicMod, PublicModList } from '../shared/types.js';
-import { modSides } from '../shared/types.js';
+import type { AdminMod, AdminModList, DisplaySettings, ModBinding, ModCategorySource, ModSide, ModUpdate, PublicMod, PublicModList } from '../shared/types.js';
+import { defaultDisplay, modSides } from '../shared/types.js';
 import { classify, createModrinth, ModrinthError, versionFileUrl, type Modrinth, type ModrinthProject } from './modrinth.js';
 import { HttpError } from './errors.js';
 
@@ -179,6 +179,7 @@ export async function createModService(options: {
   let debounce: NodeJS.Timeout | null = null;
   let backoffUntil = 0;
   let closed = false;
+  let display: DisplaySettings = defaultDisplay;
 
   function announce() {
     revision++;
@@ -462,6 +463,8 @@ export async function createModService(options: {
       error: entry.moveError ?? entry.lookupError,
     };
   }
+  const publicSides = () => modSides.filter(side => side === 'both'
+    || (side === 'server' ? display.showServerMods : display.showClientMods));
   const ordered = () => [...entries].sort((a, b) => displayName(a).localeCompare(displayName(b), 'zh-Hans-CN') || a.fileName.localeCompare(b.fileName));
 
   function downloadAddress(value: unknown) {
@@ -497,8 +500,15 @@ export async function createModService(options: {
       timer.unref?.();
       await cycle();
     },
+    // Hidden categories disappear from the public list and their downloads, but stay manageable.
+    setDisplay(next: DisplaySettings) {
+      if (next.showServerMods === display.showServerMods && next.showClientMods === display.showClientMods) return;
+      display = { ...next };
+      announce();
+    },
     publicList(): PublicModList {
-      return { revision, mods: ordered().filter(entry => entry.enabled).map(toPublic) };
+      const sides = publicSides();
+      return { revision, mods: ordered().filter(entry => entry.enabled && sides.includes(effectiveSide(entry))).map(toPublic), sides };
     },
     adminList(): AdminModList {
       return { revision, mods: ordered().map(toAdmin), scanning: !!directory && !scanned, configured: !!directory };
@@ -580,7 +590,7 @@ export async function createModService(options: {
     },
     async download(id: unknown) {
       const entry = entryOf(id);
-      if (!entry.enabled || !directory) throw new HttpError(404, '该模组当前不可下载。');
+      if (!entry.enabled || !directory || !publicSides().includes(effectiveSide(entry))) throw new HttpError(404, '该模组当前不可下载。');
       // A bound entry downloads the Modrinth file that matches the local hash, never the newest release.
       const remote = entry.bound ? entry.version?.url ?? null : entry.downloadUrl;
       if (remote) return { redirect: remote, path: null, fileName: null, size: 0 };

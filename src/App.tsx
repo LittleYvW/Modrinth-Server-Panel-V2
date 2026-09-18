@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CheckCheck, LoaderCircle, LogOut, Moon, Settings, Sun, X } from 'lucide-react';
-import Artwork, { Cube, FabricIcon, GrassBlock } from './Artwork';
+import Artwork, { Cube } from './Artwork';
+import EnvironmentIcon from './EnvironmentIcon';
 import { AdminMods, PublicMods } from './Mods';
 import { AuthDialog, ConfigForm, SettingsDialog } from './Admin';
 import { api, errorMessage } from './api';
@@ -28,7 +29,7 @@ function Header({ theme, toggleTheme, manage, admin, configured, logout, busy, e
 const demoConfig: PublicConfig = { minecraftVersion: '1.20.1', loader: 'fabric', loaderVersion: '0.15.11' };
 function Hero({ config }: { config: PublicConfig | null }) {
   const value = config ?? demoConfig;
-  return <section className="hero" aria-label="整合包版本"><p className="eyebrow">A MORE OPEN TOMORROW.</p><h1><GrassBlock /><span>Minecraft {value.minecraftVersion}</span></h1><span className="hero-divider" /><h2>{value.loader === 'fabric' ? <FabricIcon /> : <Cube className="loader-cube" />}<span>{loaderNames[value.loader]}{value.loaderVersion ? ` ${value.loaderVersion}` : ''}</span></h2><p className="tagline">同一个世界，无限种可能。</p></section>;
+  return <section className="hero" aria-label="整合包版本"><p className="eyebrow">A MORE OPEN TOMORROW.</p><h1><EnvironmentIcon kind="minecraft" version={value.minecraftVersion} versionType={value.minecraftVersionType} /><span>Minecraft {value.minecraftVersion}</span></h1><span className="hero-divider" /><h2><EnvironmentIcon kind="loader" loader={value.loader} version={value.loaderVersion} /><span>{loaderNames[value.loader]}{value.loaderVersion ? ` ${value.loaderVersion}` : ''}</span></h2><p className="tagline">同一个世界，无限种可能。</p></section>;
 }
 export default function App() {
   const [theme, setTheme] = useState<Theme>(readTheme);

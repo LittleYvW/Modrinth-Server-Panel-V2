@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { ArrowDownToLine, CircleCheck, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { discardFile, fetchFile, saveFile, wait, type DownloadFile, type Fetched } from './downloads';
 
-export type DownloadFile = { url: string; name: string };
 // idle → connecting (clicked, no response headers yet) → downloading (bytes arriving) → done.
 export type DownloadPhase = 'idle' | 'connecting' | 'downloading' | 'done';
 type Progress = { total: number; finished: number; failed: number; ratio: number };
@@ -10,37 +10,6 @@ const CONCURRENCY = 3;
 const SAVE_GAP = 300;
 const DONE_HOLD = 2500;
 const empty: Progress = { total: 0, finished: 0, failed: 0, ratio: 0 };
-
-const wait = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
-  const id = window.setTimeout(resolve, ms);
-  signal.addEventListener('abort', () => { window.clearTimeout(id); resolve(); }, { once: true });
-});
-
-function clickLink(href: string, name: string) {
-  const link = document.createElement('a');
-  link.href = href;
-  link.download = name;
-  link.hidden = true;
-  document.body.append(link);
-  link.click();
-  link.remove();
-}
-
-// Cross-origin responses hide Content-Disposition, so CDN files fall back to the URL's last segment.
-export function fileNameOf(res: Response, fallback: string) {
-  const header = res.headers.get('Content-Disposition') ?? '';
-  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header)?.[1];
-  const plain = /filename="([^"]+)"/i.exec(header)?.[1];
-  const segment = res.url ? new URL(res.url, location.href).pathname.split('/').pop() : '';
-  for (const candidate of [encoded, plain, segment]) {
-    if (!candidate) continue;
-    try {
-      const name = decodeURIComponent(candidate);
-      if (candidate !== segment || name.toLowerCase().endsWith('.jar')) return name;
-    } catch { /* malformed escape, try the next source */ }
-  }
-  return fallback;
-}
 
 export default function DownloadCard({ files, loading, error, active }: {
   files: DownloadFile[]; loading: boolean; error: string; active: boolean;
@@ -97,49 +66,24 @@ export default function DownloadCard({ files, loading, error, active }: {
     // Browsers drop downloads dispatched back to back, so saves stay spaced like the old link queue.
     let saving = Promise.resolve();
     let saved = 0;
-    const save = (href: string, name: string, revoke: boolean) => {
+    const save = (file: Fetched) => {
       saving = saving.then(async () => {
         if (saved++) await wait(SAVE_GAP, signal);
-        if (revoke) window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
-        if (!signal.aborted) clickLink(href, name);
+        if (signal.aborted) discardFile(file);
+        else saveFile(file);
       });
     };
 
     const worker = async () => {
       while (!signal.aborted && next < queue.length) {
         const index = next++;
-        const file = queue[index];
-        let res: Response;
+        let result: Fetched | null;
         try {
-          res = await fetch(file.url, { signal });
-        } catch {
-          if (signal.aborted) return;
-          // No CORS on a custom mirror (or similar): let the browser download it natively instead.
-          ratios[index] = 1; finished++; report();
-          save(file.url, '', false);
-          continue;
-        }
-        if (signal.aborted) return;
-        setPhase('downloading');
-        try {
-          if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-          const total = Number(res.headers.get('Content-Length')) || 0;
-          const reader = res.body.getReader();
-          const chunks: BlobPart[] = [];
-          let bytes = 0;
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-            bytes += value.length;
-            if (total) { ratios[index] = Math.min(bytes / total, 1); report(); }
-          }
-          ratios[index] = 1; finished++; report();
-          save(URL.createObjectURL(new Blob(chunks, { type: 'application/java-archive' })), fileNameOf(res, file.name), true);
-        } catch {
-          if (signal.aborted) return;
-          ratios[index] = 1; failed++; report();
-        }
+          result = await fetchFile(queue[index], signal, () => setPhase('downloading'), ratio => { ratios[index] = ratio; report(); });
+        } catch { return; }
+        ratios[index] = 1;
+        if (result) { finished++; save(result); } else failed++;
+        report();
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));

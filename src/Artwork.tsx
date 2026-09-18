@@ -8,12 +8,6 @@ export function Cube({
 }) {
   return <svg className={className} viewBox="0 0 40 44" fill="none" aria-hidden="true"><path d="M20 3 36 12v20L20 41 4 32V12Z" fill="currentColor" fillOpacity=".08" stroke="currentColor" strokeWidth="2.6" /><path d="m4 12 16 9 16-9M20 21v20" stroke="currentColor" strokeWidth="2.6" /><path d="m25 19 7-4v8l-7 4Z" fill="currentColor" /></svg>;
 }
-export function GrassBlock() {
-  return <svg className="grass-block" viewBox="0 0 60 64" aria-hidden="true"><defs><pattern id="dirt" width="11" height="13" patternUnits="userSpaceOnUse"><rect width="11" height="13" fill="#976037" /><path d="M0 0h5v5H0zM6 7h5v6H6z" fill="#754728" /><path d="M6 0h5v4H6zM0 8h4v4H0z" fill="#bd8751" /></pattern><pattern id="grass" width="9" height="9" patternUnits="userSpaceOnUse"><rect width="9" height="9" fill="#6fa334" /><path d="M0 0h4v4H0zM5 5h4v4H5z" fill="#89b53b" /></pattern></defs><path d="m3 19 27 13 27-13v31L30 63 3 50Z" fill="url(#dirt)" /><path d="m30 32 27-13v31L30 63Z" fill="#000" opacity=".2" /><path d="M3 19 30 5l27 14-27 14Z" fill="url(#grass)" /><path d="m3 19 27 14 27-14v9l-7 3v5l-7 3v-6l-7 3v5l-6 3-7-4v-5l-7-3v4l-6-3v-7l-7-3Z" fill="#51812e" /></svg>;
-}
-export function FabricIcon() {
-  return <svg className="fabric-icon" viewBox="0 0 58 60" aria-hidden="true"><path d="m28 3 7 6-3 5 18 15 5 1-5 8-7-2-18 21-6-6-7 1-8-9 5-6 19-20-4-5Z" fill="#9b8a70" /><path d="m28 10 7 5-3 4 15 12-8 7-15 16-13-12 18-20-4-5Z" fill="#e6d7b7" /><path d="m14 39 11-12m-9 17 14-14m-8 17 13-14" stroke="#f4e7cb" strokeWidth="2" /><path d="m27 11 7 6m-5 6 15 12" stroke="#655f50" strokeWidth="2" strokeDasharray="3 3" /></svg>;
-}
 const SCENE_HEIGHT = 940;
 const SEGMENT_HEIGHT = 640;
 const SEGMENT_GAP = 24;

@@ -2,12 +2,13 @@ import { mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import { loaders, type PanelConfig } from '../shared/types.js';
+import { loaders, type DisplaySettings, type PanelConfig } from '../shared/types.js';
 import { HttpError } from './errors.js';
 
 const deriveKey = promisify(scrypt);
 export type PasswordHash = { salt: string; hash: string };
-type State = { version: 1; admin: PasswordHash | null; config: PanelConfig | null };
+// `display` arrived after version 1 shipped, so older files simply lack it.
+type State = { version: 1; admin: PasswordHash | null; config: PanelConfig | null; display?: DisplaySettings };
 
 export function validatePassword(value: unknown): asserts value is string {
   if (typeof value !== 'string' || value.length < 8 || value.length > 256) {
@@ -36,7 +37,8 @@ export async function createStore(directory: string) {
       || (saved.admin && (!/^[a-f0-9]{32}$/.test(saved.admin.salt) || !/^[a-f0-9]{128}$/.test(saved.admin.hash)))
       || (saved.config && (!saved.admin || typeof saved.config.modsDirectory !== 'string'
         || typeof saved.config.minecraftVersion !== 'string' || !loaders.includes(saved.config.loader)
-        || !(saved.config.loaderVersion === null || typeof saved.config.loaderVersion === 'string')))) {
+        || !(saved.config.loaderVersion === null || typeof saved.config.loaderVersion === 'string')))
+      || (saved.display !== undefined && (typeof saved.display?.showServerMods !== 'boolean' || typeof saved.display?.showClientMods !== 'boolean'))) {
       throw new Error('配置文件格式不正确，请恢复有效备份。');
     }
     state = saved;

@@ -2,7 +2,9 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import DownloadCard, { fileNameOf } from './DownloadCard';
+import DownloadCard from './DownloadCard';
+import { fileNameOf } from './downloads';
+import ModDownload from './ModDownload';
 import { PublicMods } from './Mods';
 import { api } from './api';
 
@@ -171,6 +173,89 @@ describe('batch downloads', () => {
     fireEvent.click(button());
     expect(requests.at(-1)!.url).toBe('/api/public/mods/mod%203/download');
     expect(vi.mocked(api)).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('single mod download', () => {
+  const file = { url: '/api/public/mods/a/download', name: 'Sodium.jar' };
+  const link = () => screen.getByRole('link');
+  const mod = (active = true) => <ModDownload file={file} label="Sodium" active={active} />;
+
+  it('animates connecting, progress and completion, then saves the blob', async () => {
+    render(mod());
+    expect(link()).toHaveAttribute('href', file.url);
+    expect(link()).toHaveAttribute('data-phase', 'idle');
+    expect(fireEvent.click(link())).toBe(false);
+    fireEvent.click(link());
+    expect(requests).toHaveLength(1);
+    expect(link()).toHaveAttribute('data-phase', 'connecting');
+    expect(link()).toHaveAttribute('aria-busy', 'true');
+    expect(link().querySelector('.mod-download-ring')).toBeInTheDocument();
+
+    const stream = requests[0].respond(jar('sodium-0.6.jar', 100));
+    await advance(0);
+    expect(link()).toHaveAttribute('data-phase', 'downloading');
+    stream.push(50);
+    await advance(20);
+    expect(link().style.getPropertyValue('--progress')).toBe('0.5');
+    stream.push(50);
+    stream.end();
+    await advance(20);
+    expect(saves).toEqual([{ href: 'blob:1', name: 'sodium-0.6.jar' }]);
+    expect(link()).toHaveAttribute('data-phase', 'done');
+    expect(link()).not.toHaveAttribute('aria-busy');
+    expect(link().querySelector('.mod-download-ring')).toBeNull();
+    await advance(1500);
+    expect(link()).toHaveAttribute('data-phase', 'idle');
+  });
+
+  it('shows failures and lets the user retry', async () => {
+    render(mod());
+    fireEvent.click(link());
+    requests[0].respond({ status: 404 });
+    await advance(0);
+    expect(link()).toHaveAttribute('data-phase', 'failed');
+    expect(link()).toHaveAccessibleName('Sodium 下载失败，点击重试');
+    expect(saves).toEqual([]);
+    fireEvent.click(link());
+    expect(requests).toHaveLength(2);
+    expect(link()).toHaveAttribute('data-phase', 'connecting');
+    requests[1].respond().end();
+    await advance(0);
+    expect(saves).toEqual([{ href: 'blob:1', name: 'Sodium.jar' }]);
+  });
+
+  it('leaves modified clicks to the browser', () => {
+    render(mod());
+    for (const modifier of ['ctrlKey', 'metaKey', 'shiftKey', 'altKey']) expect(fireEvent.click(link(), { [modifier]: true })).toBe(true);
+    expect(fireEvent.click(link(), { button: 1 })).toBe(true);
+    expect(requests).toEqual([]);
+  });
+
+  it.each(['inactive', 'unmount', 'pagehide'])('aborts on %s', async reason => {
+    const view = render(mod());
+    fireEvent.click(link());
+    requests[0].respond().push(10);
+    if (reason === 'inactive') view.rerender(mod(false));
+    else if (reason === 'unmount') view.unmount();
+    else fireEvent(window, new Event('pagehide'));
+    await advance(100);
+    expect(requests[0].signal.aborted).toBe(true);
+    expect(saves).toEqual([]);
+    if (reason !== 'unmount') expect(link()).toHaveAttribute('data-phase', 'idle');
+  });
+
+  it('is wired into every public mod row', async () => {
+    vi.stubGlobal('EventSource', class { addEventListener() {} close() {} });
+    vi.mocked(api).mockResolvedValueOnce({ revision: 1, mods: [
+      { id: 'mod 1', name: 'Mod 1', side: 'server', description: '', version: '', iconUrl: null, projectUrl: null },
+    ] });
+    await act(async () => { render(<PublicMods />); });
+    fireEvent.click(screen.getByRole('link', { name: '下载 Mod 1' }));
+    expect(requests.map(request => request.url)).toEqual(['/api/public/mods/mod%201/download']);
+    requests[0].respond().end();
+    await advance(0);
+    expect(saves).toEqual([{ href: 'blob:1', name: 'Mod 1.jar' }]);
   });
 });
 

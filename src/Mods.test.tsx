@@ -45,6 +45,14 @@ describe('public mod list', () => {
     expect(within(panel('服务端')).getByText('该分类暂无已开启的模组。')).toBeInTheDocument();
   });
 
+  it('leaves out the categories the administrator hid from the public page', async () => {
+    mocked.mockResolvedValue({ revision: 1, mods: [publicMod({ side: 'server' })], sides: ['both', 'server'] });
+    render(<PublicMods />);
+    await screen.findByText('Sodium');
+    expect(panel('双端')).toBeInTheDocument();
+    expect(panel('服务端')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /客户端/ })).not.toBeInTheDocument();
+  });
   it('falls back to the default icon when a remote icon fails to load', async () => {
     mocked.mockResolvedValue({ revision: 1, mods: [publicMod()] });
     const view = render(<PublicMods />);

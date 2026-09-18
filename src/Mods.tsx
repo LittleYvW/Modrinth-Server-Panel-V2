@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowDownToLine, Link2, Link2Off, LoaderCircle, RefreshCw, Settings2, TriangleAlert } from 'lucide-react';
+import { Link2, Link2Off, LoaderCircle, RefreshCw, Settings2, TriangleAlert } from 'lucide-react';
 import { Cube } from './Artwork';
 import Modal from './Modal';
 import DownloadCard from './DownloadCard';
+import ModDownload from './ModDownload';
 import { api, errorMessage } from './api';
 import { modSideNames, modSides, type AdminMod, type AdminModList, type ModSide, type ModUpdate, type PublicMod, type PublicModList } from '../shared/types';
 import { useModList } from './useMods';
@@ -32,14 +33,14 @@ function Panel({ side, count, children }: { side: ModSide; count: number; childr
 export function PublicMods({ active = true }: { active?: boolean }) {
   const { data, error, loading } = useModList<PublicModList>('/public/mods', true);
   const mods = data?.mods ?? [];
-  return <><DownloadCard files={mods.filter(mod => mod.side === 'both').map(mod => ({ url: downloadPath(mod.id), name: `${mod.name}.jar` }))}loading={!data && !error || loading} error={error} active={active} /><div className="mod-sections">{groups.map(side => {
+  return <><DownloadCard files={mods.filter(mod => mod.side === 'both').map(mod => ({ url: downloadPath(mod.id), name: `${mod.name}.jar` }))} loading={!data && !error || loading} error={error} active={active} /><div className="mod-sections">{groups.filter(side => data?.sides?.includes(side) ?? true).map(side => {
     const group = mods.filter(mod => mod.side === side);
     return <Panel key={side} side={side} count={group.length}>
       {group.length ? <ul className="mod-list">{group.map(mod => <li className="mod-row" key={mod.id}>
         <ModIcon mod={mod} />
         <div className="mod-info"><h3>{mod.name}</h3><p>{mod.description || '未在 Modrinth 上识别到该模组，使用文件名显示。'}</p></div>
         <span className="mod-version">{mod.version ? `v${mod.version}` : '—'}</span>
-        <a className="icon-button mod-download" href={downloadPath(mod.id)} aria-label={`下载 ${mod.name}`}><ArrowDownToLine size={23} /></a>
+        <ModDownload file={{ url: downloadPath(mod.id), name: `${mod.name}.jar` }} label={mod.name} active={active} />
       </li>)}</ul>
         : <p className="mod-empty">{error ? error : loading && !data ? '正在读取模组列表…' : '该分类暂无已开启的模组。'}</p>}
     </Panel>;

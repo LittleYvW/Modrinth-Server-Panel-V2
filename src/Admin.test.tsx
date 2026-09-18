@@ -107,4 +107,19 @@ describe('directory and version configuration', () => {
     expect(close).toHaveBeenCalled(); expect(saved).not.toHaveBeenCalled();
     expect(mockedApi.mock.calls.some(([path]) => path === '/admin/config')).toBe(false);
   });
+  it('toggles public server and client categories separately from the settings dialog', async () => {
+    mockedApi.mockImplementation(async (path, options) => {
+      if (path === '/admin/display') return options?.method === 'PUT' ? JSON.parse(options.body as string) : { showServerMods: true, showClientMods: true };
+      return { versions: [] };
+    });
+    const user = userEvent.setup();
+    render(<SettingsDialog config={config} close={vi.fn()} saved={vi.fn()} theme="dark" toggleTheme={vi.fn()} passwordChanged={vi.fn()} />);
+    const client = screen.getByRole('switch', { name: '显示客户端模组' });
+    await waitFor(() => expect(client).toBeEnabled());
+    expect(screen.getByRole('switch', { name: '显示服务端模组' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(client);
+    await waitFor(() => expect(client).toHaveAttribute('aria-checked', 'false'));
+    expect(screen.getByRole('switch', { name: '显示服务端模组' })).toHaveAttribute('aria-checked', 'true');
+    expect(mockedApi).toHaveBeenCalledWith('/admin/display', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ showServerMods: true, showClientMods: false }) }));
+  });
 });
