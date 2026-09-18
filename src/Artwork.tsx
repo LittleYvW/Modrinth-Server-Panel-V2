@@ -108,5 +108,5 @@ export default function Artwork({ simple = false }: { simple?: boolean }) {
         })}</g>
   <g className="artwork-decoration"><g fill="#84938f" opacity=".3"><path d="M1582 103h13v14h-13zM1595 117h14v14h-14zM1582 131h13v14h-13zM61 767h11v11H61zM83 767h11v11H83zM72 778h11v12H72zM61 790h11v11H61zM83 790h11v11H83zM1586 793h13v13h-13zM1599 780h13v13h-13z" /></g></g>
   {Array.from({ length: segments }, (_, index) => <CircuitExtension key={index} index={index} enabled={!simple} />)}
-  </svg><div className="edge-copy top-left">BUILD<br />BETTER<br />TOGETHER</div><div className="edge-copy top-right">MODS<br />POWER<br />COMMUNITY</div><div className="edge-copy bottom-left">SAME<br />GAME<br />BIGGER<br />POSSIBILITIES</div><div className="edge-copy bottom-right">SERVERS<br />MODS<br />PEOPLE</div></div>;
+  </svg></div>;
 }

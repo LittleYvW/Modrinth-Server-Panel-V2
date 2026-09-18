@@ -244,32 +244,6 @@ main {
   background:repeating-linear-gradient(0deg,transparent,transparent 3px,#709d8303 3px,#709d8303 4px);
   opacity:.65
 }
-.edge-copy {
-  position:absolute;
-  font:11px/1.85 Consolas,monospace;
-  letter-spacing:2px;
-  color:#78817d;
-  opacity:.78
-}
-.top-left {
-  left:2.7%;
-  top:60px;
-  border-left:1px solid #78817d80;
-  padding-left:10px;
-  padding-bottom:95px
-}
-.top-right {
-  right:2.6%;
-  top:116px
-}
-.bottom-left {
-  left:3.4%;
-  top:755px
-}
-.bottom-right {
-  right:2.7%;
-  top:775px
-}
 .main-content {
   position:relative;
   z-index:1;
@@ -282,13 +256,6 @@ main {
 }
 .hero {
   text-align:center
-}
-.eyebrow {
-  font-family:Consolas,monospace;
-  font-size:10px;
-  letter-spacing:6px;
-  color:#3aa663;
-  margin-bottom:23px
 }
 .hero h1 {
   display:flex;
@@ -341,12 +308,6 @@ main {
   width:54px;
   height:54px;
   filter:drop-shadow(0 2px 2px #0008)
-}
-.tagline {
-  font-size:10px;
-  letter-spacing:6px;
-  color:#85928a;
-  margin-top:14px
 }
 .download-card {
   width:205px;
@@ -542,27 +503,6 @@ main {
   width:41px;
   height:39px
 }
-footer {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:8px;
-  font-size:10px;
-  letter-spacing:1px;
-  color:#64786b;
-  margin-top:22px
-}
-.status-dot {
-  height:5px;
-  width:5px;
-  background:#35db76;
-  border-radius:50%;
-  box-shadow:0 0 7px #35db7650
-}
-.footer-separator {
-  margin:0 7px;
-  color:#395345
-}
 .section-kicker {
   font:10px/1.5 Consolas,monospace;
   color:var(--green);
@@ -747,14 +687,8 @@ to {
 [data-theme="light"] .mod-side.both,[data-theme="light"] .mod-version {
   color:#617366
 }
-[data-theme="light"] .tagline {
-  color:#5c7666
-}
 [data-theme="light"] .mod-icon {
   background:linear-gradient(135deg,#d6dfd6,#aab9ac)
-}
-[data-theme="light"] .edge-copy {
-  color:#526c5a
 }
 
 @media(min-width:1450px) {
@@ -772,9 +706,6 @@ main {
 }
 .main-content {
   padding-top:35px
-}
-.eyebrow {
-  margin-bottom:24px
 }
 .download-card {
   margin-top:22px
@@ -798,10 +729,6 @@ main {
 }
 .header-actions {
   gap:22px
-}
-.edge-copy {
-  font-size:9px;
-  opacity:.5
 }
 .scene {
   opacity:.85
@@ -857,11 +784,6 @@ main {
   width:40px;
   height:46px
 }
-.eyebrow {
-  font-size:8px;
-  letter-spacing:4px;
-  margin-bottom:22px
-}
 .hero h2 {
   font-size:28px;
   gap:12px
@@ -872,11 +794,6 @@ main {
 }
 .hero-divider {
   margin:13px auto 9px
-}
-.tagline {
-  font-size:9px;
-  letter-spacing:4px;
-  margin-top:11px
 }
 .download-card {
   width:180px;
@@ -894,9 +811,6 @@ main {
   top:-40px;
   width:1240px;
   opacity:.6
-}
-.edge-copy {
-  display:none
 }
 .mods-panel {
   padding:0 9px 9px;
@@ -955,14 +869,6 @@ main {
 .panel-heading>span {
   font-size:10px
 }
-footer {
-  font-size:9px;
-  letter-spacing:0;
-  gap:6px
-}
-.footer-separator {
-  margin:0 3px
-}
 .section-kicker {
   font-size:9px
 }
@@ -989,9 +895,6 @@ footer {
 .main-content {
   padding-left:12px;
   padding-right:12px
-}
-.footer-separator,footer>span:last-child {
-  display:none
 }
 .toast {
   gap:9px;
@@ -1095,8 +998,8 @@ footer {
   width:100%;
   animation:auth-fade-out 220ms ease-out both;
 }
-.artwork-decoration,.artwork .edge-copy { transition:opacity 320ms ease; }
-.artwork-simple .artwork-decoration,.artwork-simple .edge-copy { opacity:0; }
+.artwork-decoration { transition:opacity 320ms ease; }
+.artwork-simple .artwork-decoration { opacity:0; }
 @keyframes auth-enter {
   from { opacity:0; transform:translateY(16px) scale(.975); }
   to { opacity:1; transform:none; }
@@ -1126,8 +1029,6 @@ footer {
   .main-content { padding-top: 31px; padding-bottom: 6px; }
   .hero-divider { margin: 11px auto 8px; }
   .environment-icon-loader { height: 50px; }
-  .tagline { margin-top: 10px; }
-  footer { margin-top: 12px; }
 }
 
 /* Mod lists: three fixed categories on the public page and in the workspace. */
