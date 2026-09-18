@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowDownToLine, Link2, Link2Off, LoaderCircle, RefreshCw, Settings2, TriangleAlert } from 'lucide-react';
 import { Cube } from './Artwork';
 import Modal from './Modal';
+import DownloadCard from './DownloadCard';
 import { api, errorMessage } from './api';
 import { modSideNames, modSides, type AdminMod, type AdminModList, type ModSide, type ModUpdate, type PublicMod, type PublicModList } from '../shared/types';
 import { useModList } from './useMods';
@@ -28,10 +29,10 @@ function Panel({ side, count, children }: { side: ModSide; count: number; childr
   </section>;
 }
 
-export function PublicMods() {
+export function PublicMods({ active = true }: { active?: boolean }) {
   const { data, error, loading } = useModList<PublicModList>('/public/mods', true);
   const mods = data?.mods ?? [];
-  return <div className="mod-sections">{groups.map(side => {
+  return <><DownloadCard urls={mods.filter(mod => mod.side === 'both').map(mod => downloadPath(mod.id))} loading={!data && !error || loading} error={error} active={active} /><div className="mod-sections">{groups.map(side => {
     const group = mods.filter(mod => mod.side === side);
     return <Panel key={side} side={side} count={group.length}>
       {group.length ? <ul className="mod-list">{group.map(mod => <li className="mod-row" key={mod.id}>
@@ -42,7 +43,7 @@ export function PublicMods() {
       </li>)}</ul>
         : <p className="mod-empty">{error ? error : loading && !data ? '正在读取模组列表…' : '该分类暂无已开启的模组。'}</p>}
     </Panel>;
-  })}</div>;
+  })}</div></>;
 }
 
 function ConfigDialog({ mod, close, saved }: { mod: AdminMod; close: () => void; saved: (value: AdminMod) => void }) {

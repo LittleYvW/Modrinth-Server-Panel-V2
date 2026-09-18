@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, CheckCheck, LoaderCircle, LogOut, Moon, Settings, Sun, X } from 'lucide-react';
+import { CheckCheck, LoaderCircle, LogOut, Moon, Settings, Sun, X } from 'lucide-react';
 import Artwork, { Cube, FabricIcon, GrassBlock } from './Artwork';
 import { AdminMods, PublicMods } from './Mods';
 import { AuthDialog, ConfigForm, SettingsDialog } from './Admin';
@@ -29,9 +29,6 @@ const demoConfig: PublicConfig = { minecraftVersion: '1.20.1', loader: 'fabric',
 function Hero({ config }: { config: PublicConfig | null }) {
   const value = config ?? demoConfig;
   return <section className="hero" aria-label="整合包版本"><p className="eyebrow">A MORE OPEN TOMORROW.</p><h1><GrassBlock /><span>Minecraft {value.minecraftVersion}</span></h1><span className="hero-divider" /><h2>{value.loader === 'fabric' ? <FabricIcon /> : <Cube className="loader-cube" />}<span>{loaderNames[value.loader]}{value.loaderVersion ? ` ${value.loaderVersion}` : ''}</span></h2><p className="tagline">同一个世界，无限种可能。</p></section>;
-}
-function DownloadCard({ download }: { download: () => void }) {
-  return <button className="download-card" onClick={download}><span className="pixel-corner corner-one" /><ArrowDownToLine size={62} strokeWidth={1.8} /><strong>下载整合包</strong><span className="download-subtitle">暂未开放，可先按分类下载单个模组</span><span className="pixel-corner corner-two" /></button>;
 }
 export default function App() {
   const [theme, setTheme] = useState<Theme>(readTheme);
@@ -149,7 +146,7 @@ export default function App() {
           : config === null ? <section className="setup-panel"><div className="workspace-intro"><span className="section-kicker">WELCOME TO YOUR WORKSPACE</span><h1>让世界准备就绪。</h1><p>完成两个简单设置，开始管理你的模组。</p></div><ConfigForm wizard saved={onSaved} /></section>
             : <section className="manager-workspace" aria-labelledby="manager-title"><div className="workspace-heading"><div><span className="section-kicker">YOUR WORKSPACE</span><h1 id="manager-title">模组管理器</h1></div><span className="environment-badge">Minecraft {config.minecraftVersion}<span />{loaderNames[config.loader]}{config.loaderVersion ? ` ${config.loaderVersion}` : ''}</span></div><AdminMods notify={notify} /></section>}
       </div>}
-      {(!admin || expanding) && <div className={`main-content${expanding ? ' home-leaving' : ''}`} inert={expanding} aria-hidden={expanding || undefined}><Hero config={publicConfig} /><DownloadCard download={() => notify('整合包下载', '整合包打包功能暂未开放，可在下方按分类下载单个模组。')} /><PublicMods /><footer><span className="status-dot" />为更好的游戏体验而构建<span className="footer-separator">/</span><span>保持原版，探索更多。</span></footer></div>}
+      {(!admin || expanding) && <div className={`main-content${expanding ? ' home-leaving' : ''}`} inert={expanding} aria-hidden={expanding || undefined}><Hero config={publicConfig} /><PublicMods active={!isAdminRoute} /><footer><span className="status-dot" />为更好的游戏体验而构建<span className="footer-separator">/</span><span>保持原版，探索更多。</span></footer></div>}
     </main>
     {authOpen && <AuthDialog key={authAttempt} close={() => { setAuthOpen(false); if (isAdminRoute && !auth?.authenticated) window.location.hash = ''; }} authenticated={onAuthenticated} transition={expanding ? { target: adminContent, complete: finishAuthTransition } : undefined} />}
     {settings && config && <SettingsDialog config={config} close={() => setSettings(false)} saved={onSaved} theme={theme} toggleTheme={toggleTheme} passwordChanged={() => { signedOut(); setAuthOpen(true); notify('密码已更新', '请使用新密码重新登录。'); }} />}

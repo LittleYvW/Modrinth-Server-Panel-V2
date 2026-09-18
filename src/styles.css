@@ -367,7 +367,7 @@ main {
   color:#b2d6bd;
   margin-top:5px
 }
-.download-card:hover {
+.download-card:hover:not(:disabled) {
   background:linear-gradient(130deg,#22c767,#1b7548 56%,#1b6840);
   transform:translateY(-3px);
   box-shadow:0 8px 36px #21c76726
@@ -1175,3 +1175,6 @@ footer {
 @media(max-width:560px) {
   .mod-row .mod-version { max-width:78px; font-size:10px; }
 }
+
+.download-card:disabled { cursor:not-allowed; opacity:.65; }
+.download-status { margin:8px 16px 0; max-width:540px; text-align:center; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
