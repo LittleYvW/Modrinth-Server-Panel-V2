@@ -1,40 +1,39 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { ArrowDownToLine, CircleCheck, LoaderCircle, TriangleAlert } from 'lucide-react';
-import { discardFile, fetchFile, saveFile, wait, type DownloadFile, type Fetched } from './downloads';
+import { wait, type DownloadFile, type DownloadHandle } from './downloads';
 
-// idle → connecting (clicked, no response headers yet) → downloading (bytes arriving) → done.
+// idle → connecting (clicked, no row has answered yet) → downloading (a row is receiving bytes) → done.
 export type DownloadPhase = 'idle' | 'connecting' | 'downloading' | 'done';
 type Progress = { total: number; finished: number; failed: number; ratio: number };
 
-const CONCURRENCY = 3;
-const SAVE_GAP = 300;
+const START_GAP = 300;
 const DONE_HOLD = 2500;
 const empty: Progress = { total: 0, finished: 0, failed: 0, ratio: 0 };
 
-export default function DownloadCard({ files, loading, error, active }: {
+// The card downloads nothing itself: it runs the mod rows' own downloads in list order, one at a time,
+// so every file goes through the same path as a click on that row and the row shows its own progress.
+export default function DownloadCard({ files, loading, error, active, handleOf }: {
   files: DownloadFile[]; loading: boolean; error: string; active: boolean;
+  handleOf: (url: string) => DownloadHandle | undefined;
 }) {
   const [phase, setPhase] = useState<DownloadPhase>('idle');
   const [progress, setProgress] = useState<Progress>(empty);
   const run = useRef<AbortController | null>(null);
+  const current = useRef<DownloadHandle | null>(null);
   const timer = useRef<number | undefined>(undefined);
   const statusId = useId();
   useEffect(() => {
-    const cancel = () => {
+    const stop = () => {
       window.clearTimeout(timer.current);
       run.current?.abort();
       run.current = null;
-      setPhase('idle');
-      setProgress(empty);
+      current.current?.abort();
+      current.current = null;
     };
+    const cancel = () => { stop(); setPhase('idle'); setProgress(empty); };
     if (!active) cancel();
     window.addEventListener('pagehide', cancel);
-    return () => {
-      window.clearTimeout(timer.current);
-      run.current?.abort();
-      run.current = null;
-      window.removeEventListener('pagehide', cancel);
-    };
+    return () => { stop(); window.removeEventListener('pagehide', cancel); };
   }, [active]);
 
   const busy = phase === 'connecting' || phase === 'downloading';
@@ -51,45 +50,40 @@ export default function DownloadCard({ files, loading, error, active }: {
     const controller = new AbortController();
     const { signal } = controller;
     run.current = controller;
-    const ratios = queue.map(() => 0);
-    let finished = 0, failed = 0, next = 0, frame = 0;
+    let finished = 0, failed = 0, ratio = 0, frame = 0, answered = false;
     const flush = () => {
       frame = 0;
       if (signal.aborted) return;
-      setProgress({ total: queue.length, finished, failed, ratio: ratios.reduce((sum, value) => sum + value, 0) / queue.length });
+      setProgress({ total: queue.length, finished, failed, ratio: (finished + failed + ratio) / queue.length });
     };
     // Coalesce per-chunk updates to one render per frame.
     const report = () => { if (!frame) frame = requestAnimationFrame(flush); };
     setPhase('connecting');
     setProgress({ ...empty, total: queue.length });
 
-    // Browsers drop downloads dispatched back to back, so saves stay spaced like the old link queue.
-    let saving = Promise.resolve();
-    let saved = 0;
-    const save = (file: Fetched) => {
-      // A save that throws must not reject the chain: that would skip every file still queued behind it
-      // and leave the card stuck on `downloading` with no way back.
-      saving = saving.then(async () => {
-        if (saved++) await wait(SAVE_GAP, signal);
-        if (signal.aborted) discardFile(file);
-        else saveFile(file);
-      }).catch(() => discardFile(file));
-    };
-
-    const worker = async () => {
-      while (!signal.aborted && next < queue.length) {
-        const index = next++;
-        let result: Fetched | null;
-        try {
-          result = await fetchFile(queue[index], signal, () => setPhase('downloading'), ratio => { ratios[index] = ratio; report(); });
-        } catch { return; }
-        ratios[index] = 1;
-        if (result) { finished++; save(result); } else failed++;
-        report();
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
-    await saving;
+    for (const [index, file] of queue.entries()) {
+      if (signal.aborted) break;
+      // Browsers drop downloads dispatched back to back, so a row only starts a beat after the last one saved.
+      if (index) await wait(START_GAP, signal);
+      if (signal.aborted) break;
+      const handle = handleOf(file.url);
+      ratio = 0;
+      // A mod that left the list while the queue was running no longer has a row to download from.
+      if (!handle) { failed++; report(); continue; }
+      current.current = handle;
+      let saved = false;
+      try {
+        saved = await handle.run(value => {
+          ratio = value;
+          if (!answered) { answered = true; setPhase('downloading'); }
+          report();
+        });
+      } catch { /* A row that throws counts like one that could not save. */ }
+      current.current = null;
+      ratio = 0;
+      if (saved) finished++; else failed++;
+      report();
+    }
     if (signal.aborted) return;
     cancelAnimationFrame(frame);
     flush();

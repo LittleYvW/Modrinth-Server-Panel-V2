@@ -7,6 +7,7 @@ import ModDownload from './ModDownload';
 import { api, errorMessage } from './api';
 import { modSideNames, modSides, type AdminMod, type AdminModList, type ModSide, type ModUpdate, type PublicMod, type PublicModList } from '../shared/types';
 import { useModList } from './useMods';
+import { useDownloadHandles } from './useDownloadHandles';
 import type { Tone } from './App';
 
 const groups: ModSide[] = ['both', 'server', 'client'];
@@ -34,14 +35,16 @@ function Panel({ side, count, children }: { side: ModSide; count: number; childr
 export function PublicMods({ active = true }: { active?: boolean }) {
   const { data, error, loading } = useModList<PublicModList>('/public/mods', true);
   const mods = data?.mods ?? [];
-  return <><DownloadCard files={mods.filter(mod => mod.side === 'both').map(mod => ({ url: downloadPath(mod.id), name: `${mod.name}.jar` }))} loading={!data && !error || loading} error={error} active={active} /><div className="mod-sections">{groups.filter(side => data?.sides?.includes(side) ?? true).map(side => {
+  // "Download all" drives these rows one at a time, so every row lends it the download its button would start.
+  const { register, handleOf } = useDownloadHandles();
+  return <><DownloadCard files={mods.filter(mod => mod.side === 'both').map(mod => ({ url: downloadPath(mod.id), name: `${mod.name}.jar` }))} loading={!data && !error || loading} error={error} active={active} handleOf={handleOf} /><div className="mod-sections">{groups.filter(side => data?.sides?.includes(side) ?? true).map(side => {
     const group = mods.filter(mod => mod.side === side);
     return <Panel key={side} side={side} count={group.length}>
       {group.length ? <ul className="mod-list">{group.map(mod => <li className="mod-row" key={mod.id}>
         <ModIcon mod={mod} />
         <div className="mod-info"><h3>{mod.name}</h3><p>{mod.description || '未在 Modrinth 上识别到该模组，使用文件名显示。'}</p></div>
         <span className="mod-version">{mod.version ? `v${mod.version}` : '—'}</span>
-        <ModDownload file={{ url: downloadPath(mod.id), name: `${mod.name}.jar` }} label={mod.name} active={active} />
+        <ModDownload file={{ url: downloadPath(mod.id), name: `${mod.name}.jar` }} label={mod.name} active={active} register={register} />
       </li>)}</ul>
         : <p className="mod-empty">{error ? error : loading && !data ? '正在读取模组列表…' : '该分类暂无已开启的模组。'}</p>}
     </Panel>;

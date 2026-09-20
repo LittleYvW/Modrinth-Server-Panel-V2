@@ -1,4 +1,9 @@
 export type DownloadFile = { url: string; name: string };
+// "Download all" runs the rows' own downloads one at a time, so every mounted row lends the card a handle:
+// `run` starts exactly what the row's button would, reporting its 0–1 ratio, and resolves true once saved.
+export type DownloadHandle = { run: (report: (ratio: number) => void) => Promise<boolean>; abort: () => void };
+// Registers a row's handle under its download URL and returns the unregister for the row's effect cleanup.
+export type RegisterDownload = (url: string, handle: DownloadHandle) => () => void;
 // A fetched file ready to save: a blob URL, or the original URL when the browser must fetch it natively.
 export type Fetched = { href: string; name: string; blob: boolean };
 
