@@ -119,6 +119,33 @@ describe('batch downloads', () => {
     expect(screen.getByRole('status')).toHaveTextContent('1 个模组下载失败，其余 2 个已保存。');
   });
 
+  it('leaves the connecting phase when every request is handed to the browser', async () => {
+    render(card(files('/mirror-one', '/mirror-two')));
+    fireEvent.click(button());
+    expect(button()).toHaveAttribute('data-phase', 'connecting');
+    requests[0].fail();
+    await advance(0);
+    expect(button()).toHaveAttribute('data-phase', 'downloading');
+    requests[1].fail();
+    await advance(1000);
+    expect(saves).toEqual([{ href: '/mirror-one', name: '' }, { href: '/mirror-two', name: '' }]);
+    expect(button()).toHaveTextContent('下载完成');
+  });
+
+  it('keeps going and cleans up when the browser refuses a save', async () => {
+    vi.mocked(HTMLAnchorElement.prototype.click).mockImplementationOnce(() => { throw new Error('blocked'); });
+    render(card(files('/a', '/b')));
+    fireEvent.click(button());
+    requests[0].respond().end();
+    requests[1].respond().end();
+    await advance(1000);
+    expect(saves).toEqual([{ href: 'blob:2', name: 'b.jar' }]);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:1');
+    expect(document.querySelector('a[download]')).toBeNull();
+    expect(button()).toHaveAttribute('data-phase', 'done');
+    expect(button()).toBeEnabled();
+  });
+
   it.each(['inactive', 'unmount', 'pagehide'])('aborts pending downloads on %s', async reason => {
     const view = render(card());
     fireEvent.click(button());

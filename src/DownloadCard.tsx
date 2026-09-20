@@ -67,11 +67,13 @@ export default function DownloadCard({ files, loading, error, active }: {
     let saving = Promise.resolve();
     let saved = 0;
     const save = (file: Fetched) => {
+      // A save that throws must not reject the chain: that would skip every file still queued behind it
+      // and leave the card stuck on `downloading` with no way back.
       saving = saving.then(async () => {
         if (saved++) await wait(SAVE_GAP, signal);
         if (signal.aborted) discardFile(file);
         else saveFile(file);
-      });
+      }).catch(() => discardFile(file));
     };
 
     const worker = async () => {

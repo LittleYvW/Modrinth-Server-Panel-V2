@@ -19,9 +19,9 @@ export function fileNameOf(res: Response, fallback: string) {
 }
 
 /**
- * Downloads a file through fetch so callers can observe it. `onStart` fires once response headers arrive and
- * `onProgress` with a 0–1 ratio per chunk when the size is known. Resolves null on an HTTP failure and rejects
- * only when `signal` aborts.
+ * Downloads a file through fetch so callers can observe it. `onStart` fires once the request stops waiting on
+ * headers — they arrived, or the fetch failed and the browser takes over — and `onProgress` with a 0–1 ratio
+ * per chunk when the size is known. Resolves null on an HTTP failure and rejects only when `signal` aborts.
  */
 export async function fetchFile(file: DownloadFile, signal: AbortSignal, onStart: () => void, onProgress: (ratio: number) => void): Promise<Fetched | null> {
   let res: Response;
@@ -29,7 +29,10 @@ export async function fetchFile(file: DownloadFile, signal: AbortSignal, onStart
     res = await fetch(file.url, { signal });
   } catch (error) {
     if (signal.aborted) throw error;
-    // No CORS on a custom mirror (or similar): let the browser download it natively instead.
+    // No CORS on a custom mirror (or similar): let the browser download it natively instead. Start anyway
+    // even though no headers were read: a queue made only of mirrors would otherwise stay on "connecting"
+    // for its whole run.
+    onStart();
     return { href: file.url, name: '', blob: false };
   }
   signal.throwIfAborted();
@@ -61,8 +64,8 @@ export function saveFile({ href, name, blob }: Fetched) {
   link.download = name;
   link.hidden = true;
   document.body.append(link);
-  link.click();
-  link.remove();
+  // A click the browser refuses still has to take the anchor with it.
+  try { link.click(); } finally { link.remove(); }
   if (blob) window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
 }
 
